@@ -56,6 +56,10 @@ IDs, creates the requested shuffle or bracket tournament, registers players
 where the Auto Tournament workflow requires it, and starts the tournament.
 When no members are selected, every group member with a Steam ID is included;
 members without one are skipped and listed in the action response.
+For explicit selection, Varde sends `players` as member objects containing
+`user_id`, `display_name`, and `steam_id`. The plugin uses only `user_id` and
+fetches the group member list itself for Steam IDs and display names; plain
+user-ID string arrays are also accepted for compatibility.
 
 Auto Tournament is licensed under PolyForm Noncommercial. Self-hosting for a
 single group is permitted by that license; operating a hosted multi-client

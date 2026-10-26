@@ -195,13 +195,15 @@ func TestCreateActionSelectionAndSkippedNotes(t *testing.T) {
 
 	var mu sync.Mutex
 	imports := make([][]string, 0, 2)
+	importedNames := make([][]string, 0, 2)
 	createCount := 0
 	startCount := 0
 	atServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/players/bulk-import":
 			var players []struct {
-				ID string `json:"id"`
+				ID   string `json:"id"`
+				Name string `json:"name"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&players); err != nil {
 				t.Errorf("decode imported players: %v", err)
@@ -209,11 +211,14 @@ func TestCreateActionSelectionAndSkippedNotes(t *testing.T) {
 				return
 			}
 			ids := make([]string, 0, len(players))
+			names := make([]string, 0, len(players))
 			for _, player := range players {
 				ids = append(ids, player.ID)
+				names = append(names, player.Name)
 			}
 			mu.Lock()
 			imports = append(imports, ids)
+			importedNames = append(importedNames, names)
 			mu.Unlock()
 			_, _ = w.Write([]byte(`{"errors":[]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/tournaments":
@@ -245,8 +250,13 @@ func TestCreateActionSelectionAndSkippedNotes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for index, selected := range [][]string{
-		{"user-1", "user-2", "user-3", "user-4"},
+	for index, selected := range [][]map[string]any{
+		{
+			{"user_id": "user-1", "display_name": "Untrusted One", "steam_id": "99999999999999991"},
+			{"user_id": "user-2", "display_name": "Untrusted Two", "steam_id": "99999999999999992"},
+			{"user_id": "user-3", "display_name": "Untrusted Three", "steam_id": "99999999999999993"},
+			{"user_id": "user-4", "display_name": "Untrusted Four", "steam_id": "99999999999999994"},
+		},
 		{},
 	} {
 		payload := map[string]any{
@@ -290,8 +300,55 @@ func TestCreateActionSelectionAndSkippedNotes(t *testing.T) {
 	if len(imports) != 2 || !reflect.DeepEqual(imports[0], wantSelected) || !reflect.DeepEqual(imports[1], wantAll) {
 		t.Fatalf("imported players = %#v", imports)
 	}
+	wantSelectedNames := []string{"One", "Two", "Three", "Four"}
+	wantAllNames := []string{"One", "Two", "Three", "Four", "Five"}
+	if len(importedNames) != 2 || !reflect.DeepEqual(importedNames[0], wantSelectedNames) ||
+		!reflect.DeepEqual(importedNames[1], wantAllNames) {
+		t.Fatalf("imported player names = %#v", importedNames)
+	}
 	if createCount != 2 || startCount != 2 {
 		t.Fatalf("tournament creates/starts = %d/%d, want 2/2", createCount, startCount)
+	}
+}
+
+func TestRawMemberIDs(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "objects",
+			raw:  `[{"user_id":"user-1","display_name":"One","steam_id":"76561190000000001"},{"user_id":"","display_name":"Empty"}]`,
+			want: []string{"user-1"},
+		},
+		{
+			name: "strings",
+			raw:  `["user-1","","user-2"]`,
+			want: []string{"user-1", "user-2"},
+		},
+		{
+			name:    "missing user_id",
+			raw:     `[{"display_name":"One"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "non-array",
+			raw:     `{"user_id":"user-1"}`,
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := rawMemberIDs(json.RawMessage(test.raw))
+			if (err != nil) != test.wantErr {
+				t.Fatalf("rawMemberIDs(%s) error = %v, want error presence %t", test.raw, err, test.wantErr)
+			}
+			if !test.wantErr && !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("rawMemberIDs(%s) = %#v, want %#v", test.raw, got, test.want)
+			}
+		})
 	}
 }
 

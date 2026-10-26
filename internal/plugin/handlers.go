@@ -255,7 +255,7 @@ func (s *Service) createTournament(w http.ResponseWriter, ctx context.Context, r
 	}
 	selected := []string(nil)
 	if raw := request.Values["players"]; len(raw) > 0 {
-		selected, err = rawStrings(raw)
+		selected, err = rawMemberIDs(raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid player selection")
 			return
@@ -506,6 +506,49 @@ func rawStrings(raw json.RawMessage) ([]string, error) {
 		return nil, err
 	}
 	return values, nil
+}
+
+func rawMemberIDs(raw json.RawMessage) ([]string, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, errors.New("members must be an array")
+	}
+	var values []json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(values))
+	for index, value := range values {
+		item := strings.TrimSpace(string(value))
+		var userID string
+		switch {
+		case len(item) > 0 && item[0] == '{':
+			var member map[string]json.RawMessage
+			if err := json.Unmarshal(value, &member); err != nil {
+				return nil, err
+			}
+			rawUserID, ok := member["user_id"]
+			if !ok {
+				return nil, fmt.Errorf("member %d has no user_id", index)
+			}
+			if strings.TrimSpace(string(rawUserID)) == "null" {
+				return nil, fmt.Errorf("member %d has an invalid user_id", index)
+			}
+			if err := json.Unmarshal(rawUserID, &userID); err != nil {
+				return nil, fmt.Errorf("member %d has an invalid user_id: %w", index, err)
+			}
+		case len(item) > 0 && item[0] == '"':
+			if err := json.Unmarshal(value, &userID); err != nil {
+				return nil, fmt.Errorf("member %d has an invalid user ID: %w", index, err)
+			}
+		default:
+			return nil, fmt.Errorf("member %d must be an object or string", index)
+		}
+		if strings.TrimSpace(userID) != "" {
+			ids = append(ids, userID)
+		}
+	}
+	return ids, nil
 }
 
 func writeHandlerError(w http.ResponseWriter, err error) {
