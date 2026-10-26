@@ -78,10 +78,11 @@ Ready Up addon management is disabled unless **all three** values are set:
 There is no default license choice. If any pin value is missing, startup logs
 that addon management is disabled. With all values configured, the plugin
 manages `autotournament/readyup` only for servers whose `game_id` is `cs2`.
-It requests the `csgo` target, extracts the release ZIP into `game/csgo`, and
-supplies `cfg/ReadyUp/fleet.cfg` and `cfg/ReadyUp/license.cfg`. The fleet file
-uses Ready Up's documented `key = value` format. A public address is written
-only when Varde exposes a mesh address and a matching UDP game port.
+It requests the `game` target, which the CS2 driver maps to the server's
+`game/csgo` folder (CS2 kept that folder name), extracts the release ZIP there,
+and supplies `cfg/ReadyUp/fleet.cfg` and `cfg/ReadyUp/license.cfg`. The fleet
+file uses Ready Up's documented `key = value` format. A public address is
+written only when Varde exposes a mesh address and a matching UDP game port.
 
 Reconciliation runs on startup, after the settings hook, every five minutes,
 and on the group's `server.created` SSE event. It does not depend on a
@@ -96,15 +97,16 @@ The plugin records the first Ready Up license-acceptance timestamp per server
 in its encrypted state so ordinary reconciliations do not change the rendered
 specification. It sends an addon PUT only when that rendered specification
 changes during the current plugin process. Varde HTTP 400 responses (for
-example, an unsupported `csgo` target) are nonfatal; the server is skipped and
+example, an unsupported `game` target) are nonfatal; the server is skipped and
 the rejection is logged once for that server.
 
 ### Driver contract
 
+- Accept the `game` addon target.
 - Extract the addon archive into `game/csgo`.
 - Resolve addon file keys relative to `game/csgo`.
 - Convert `gameinfo_search_paths` entries into `Game` lines before the `csgo`
-  entry in `gameinfo.gi`.
+  content entry in `gameinfo.gi`.
 - Reapply addons at each server start.
 
 ## State and operation

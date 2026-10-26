@@ -136,7 +136,7 @@ func buildReadyUpSpec(group state.Group, server varde.Server, acceptedAt string,
 		URL:     pin.URL,
 		SHA256:  pin.SHA256,
 		Archive: "zip",
-		Target:  "csgo",
+		Target:  "game",
 		DriverOptions: map[string]any{
 			"gameinfo_search_paths": []string{"csgo/readyup"},
 		},
