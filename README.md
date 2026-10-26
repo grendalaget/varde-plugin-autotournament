@@ -49,6 +49,7 @@ The settings hook validates the URL and pings the API before saving. If the
 hidden `fleet_key` is empty, the plugin creates one named `varde-<group_id>`
 and returns it to Varde for storage. The API token and fleet key are encrypted
 in the plugin's state file as well as protected by Varde's own settings storage.
+Changing `at_url` issues a new fleet key on the new Auto Tournament installation.
 
 The Tournaments page lists existing tournaments and links to their Auto
 Tournament pages. Creating a tournament imports group members' verified Steam

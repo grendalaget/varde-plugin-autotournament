@@ -156,7 +156,8 @@ func TestSettingsCreatesFleetKeyOnce(t *testing.T) {
 		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
 		}
-		if response.Store["fleet_key"] != "fleet-key-from-at" {
+		if response.Store["fleet_key"] != "fleet-key-from-at" ||
+			response.Store["fleet_key_url"] != atServer.URL {
 			t.Fatalf("settings response store = %#v", response.Store)
 		}
 	}
@@ -172,6 +173,148 @@ func TestSettingsCreatesFleetKeyOnce(t *testing.T) {
 	if !ok || group.FleetKey != "fleet-key-from-at" {
 		t.Fatalf("saved group = %#v, found=%v", group, ok)
 	}
+}
+
+func TestSettingsRecreatesFleetKeyWhenATURLChanges(t *testing.T) {
+	var previousCalls atomic.Int32
+	previousServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		previousCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previousServer.Close()
+	var createCalls atomic.Int32
+	newServer := newFleetKeyATServer(t, "fleet-key-from-new-at", &createCalls)
+	defer newServer.Close()
+	cpServer := httptest.NewServer(http.NotFoundHandler())
+	defer cpServer.Close()
+	service, store, secret := newTestService(t, cpServer.URL, nil)
+	if err := store.Save("group-1", state.Group{
+		ATURL:    previousServer.URL,
+		ATToken:  "old-token",
+		FleetKey: "fleet-key-from-old-at",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := servePluginRequest(t, service, secret, "settings", map[string]any{
+		"group_id": "group-1",
+		"user":     map[string]string{"id": "user-1"},
+		"settings": map[string]string{
+			"at_url":   newServer.URL,
+			"at_token": "new-token",
+		},
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings status = %d, want 200: %s", recorder.Code, recorder.Body)
+	}
+	var response struct {
+		Store map[string]string `json:"store"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Store["fleet_key"] != "fleet-key-from-new-at" ||
+		response.Store["fleet_key_url"] != newServer.URL {
+		t.Fatalf("settings response store = %#v", response.Store)
+	}
+	group, ok := store.Get("group-1")
+	if !ok || group.ATURL != newServer.URL || group.FleetKey != "fleet-key-from-new-at" {
+		t.Fatalf("saved group = %#v, found=%v", group, ok)
+	}
+	if got := createCalls.Load(); got != 1 {
+		t.Fatalf("CreateFleetKey calls on new AT = %d, want 1", got)
+	}
+	if got := previousCalls.Load(); got != 0 {
+		t.Fatalf("requests to previous AT = %d, want 0", got)
+	}
+}
+
+func TestSettingsIgnoresFleetKeyHintForDifferentURL(t *testing.T) {
+	var createCalls atomic.Int32
+	atServer := newFleetKeyATServer(t, "fleet-key-from-at", &createCalls)
+	defer atServer.Close()
+	cpServer := httptest.NewServer(http.NotFoundHandler())
+	defer cpServer.Close()
+	service, _, secret := newTestService(t, cpServer.URL, nil)
+
+	recorder := servePluginRequest(t, service, secret, "settings", map[string]any{
+		"group_id": "group-1",
+		"user":     map[string]string{"id": "user-1"},
+		"settings": map[string]string{
+			"at_url":        atServer.URL,
+			"at_token":      "at-token",
+			"fleet_key":     "stale-fleet-key",
+			"fleet_key_url": "https://old-at.example.test",
+		},
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings status = %d, want 200: %s", recorder.Code, recorder.Body)
+	}
+	var response struct {
+		Store map[string]string `json:"store"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Store["fleet_key"] != "fleet-key-from-at" ||
+		response.Store["fleet_key_url"] != atServer.URL {
+		t.Fatalf("settings response store = %#v", response.Store)
+	}
+	if got := createCalls.Load(); got != 1 {
+		t.Fatalf("CreateFleetKey calls = %d, want 1", got)
+	}
+}
+
+func TestSettingsReusesFleetKeyHintForMatchingURL(t *testing.T) {
+	var createCalls atomic.Int32
+	atServer := newFleetKeyATServer(t, "unexpected-fleet-key", &createCalls)
+	defer atServer.Close()
+	cpServer := httptest.NewServer(http.NotFoundHandler())
+	defer cpServer.Close()
+	service, _, secret := newTestService(t, cpServer.URL, nil)
+
+	recorder := servePluginRequest(t, service, secret, "settings", map[string]any{
+		"group_id": "group-1",
+		"user":     map[string]string{"id": "user-1"},
+		"settings": map[string]string{
+			"at_url":        atServer.URL,
+			"at_token":      "at-token",
+			"fleet_key":     "matching-fleet-key",
+			"fleet_key_url": atServer.URL + "/",
+		},
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("settings status = %d, want 200: %s", recorder.Code, recorder.Body)
+	}
+	var response struct {
+		Store map[string]string `json:"store"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Store["fleet_key"] != "matching-fleet-key" ||
+		response.Store["fleet_key_url"] != atServer.URL {
+		t.Fatalf("settings response store = %#v", response.Store)
+	}
+	if got := createCalls.Load(); got != 0 {
+		t.Fatalf("CreateFleetKey calls = %d, want 0", got)
+	}
+}
+
+func newFleetKeyATServer(t *testing.T, key string, createCalls *atomic.Int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/fleet/keys":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/fleet/keys":
+			createCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"value":%q}`, key)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
 }
 
 func TestCreateActionSelectionAndSkippedNotes(t *testing.T) {

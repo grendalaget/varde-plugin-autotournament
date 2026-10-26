@@ -20,6 +20,11 @@
       "name": "fleet_key",
       "type": "string",
       "hidden": true
+    },
+    {
+      "name": "fleet_key_url",
+      "type": "string",
+      "hidden": true
     }
   ],
   "pages": [

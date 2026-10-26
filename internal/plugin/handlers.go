@@ -88,12 +88,24 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	previous, _ := s.state.Get(request.GroupID)
-	fleetKey := previous.FleetKey
+	fleetKey := ""
+	if previous.ATURL == normalizedURL {
+		fleetKey = previous.FleetKey
+	}
 	if fleetKey == "" {
-		fleetKey, err = rawString(request.Settings["fleet_key"])
-		if err != nil {
+		fleetKeyHint, hintErr := rawString(request.Settings["fleet_key"])
+		if hintErr != nil {
 			writeError(w, http.StatusBadRequest, "invalid fleet key")
 			return
+		}
+		if fleetKeyHint != "" {
+			fleetKeyURLHint, hintErr := rawString(request.Settings["fleet_key_url"])
+			if hintErr == nil {
+				fleetKeyURLHint, hintErr = at.NormalizeBaseURL(fleetKeyURLHint)
+				if hintErr == nil && fleetKeyURLHint == normalizedURL {
+					fleetKey = fleetKeyHint
+				}
+			}
 		}
 	}
 	if fleetKey == "" {
@@ -121,7 +133,9 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if s.readyUp != nil {
 		s.enableGroup(request.GroupID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"store": map[string]string{"fleet_key": fleetKey}})
+	writeJSON(w, http.StatusOK, map[string]any{"store": map[string]string{
+		"fleet_key": fleetKey, "fleet_key_url": normalizedURL,
+	}})
 }
 
 func (s *Service) handleDisable(w http.ResponseWriter, r *http.Request) {
