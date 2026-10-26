@@ -304,7 +304,7 @@ func TestSettingsReusesFleetKeyHintForMatchingURL(t *testing.T) {
 	}
 }
 
-func TestDisableReportsStateDeleteFailureAndInvalidatesCache(t *testing.T) {
+func TestDisableReportsStateDeleteFailureAndKeepsGroupActive(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("permission-based state deletion failure cannot be tested as root")
 	}
@@ -347,11 +347,11 @@ func TestDisableReportsStateDeleteFailureAndInvalidatesCache(t *testing.T) {
 	if _, ok := store.Get("group-1"); !ok {
 		t.Fatal("group state was not restored after deletion failed")
 	}
-	if _, ok := service.lastSpecHashes["group-1/server-1"]; ok {
-		t.Fatal("disabled group's addon spec hash was retained after deletion failed")
+	if got := service.lastSpecHashes["group-1/server-1"]; got != "spec-hash" {
+		t.Fatalf("active group's addon spec hash = %q, want retained spec-hash", got)
 	}
-	if _, ok := service.warned400["group-1/server-1"]; ok {
-		t.Fatal("disabled group's warning state was retained after deletion failed")
+	if !service.warned400["group-1/server-1"] {
+		t.Fatal("active group's warning state was not retained after deletion failed")
 	}
 	if !strings.Contains(logs.String(), "level=ERROR") ||
 		strings.Contains(logs.String(), "secret-at-token") {
@@ -359,11 +359,8 @@ func TestDisableReportsStateDeleteFailureAndInvalidatesCache(t *testing.T) {
 	}
 	select {
 	case change := <-service.groupChanges:
-		if change.groupID != "group-1" || change.enable {
-			t.Fatalf("group change = %#v", change)
-		}
+		t.Fatalf("disable event was queued after deletion failed: %#v", change)
 	default:
-		t.Fatal("disable event was not queued after deletion failed")
 	}
 }
 
