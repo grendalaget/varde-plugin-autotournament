@@ -115,7 +115,7 @@ func TestReconcileReadyUpAddonSpecAndSkipUnchanged(t *testing.T) {
 		t.Fatalf("addon PUT count = %d, want 1", putCount)
 	}
 	if received.URL != pin.URL || received.SHA256 != pin.SHA256 ||
-		received.Archive != "zip" || received.Target != "csgo" {
+		received.Archive != "zip" || received.Target != "game" {
 		t.Fatalf("addon pin = %#v", received)
 	}
 	if !reflectSearchPath(received.DriverOptions["gameinfo_search_paths"]) {
