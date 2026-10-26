@@ -69,7 +69,7 @@ func TestClientRequests(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL+"/", "service-token")
+	client, err := NewClientWithOptions(server.URL+"/", "service-token", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestPlayerFailuresAreReturned(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewClient(server.URL, "token")
+	client, err := NewClientWithOptions(server.URL, "token", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestCheckTokenRequiresAuthenticatedFleetKeyEndpoint(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, _ := NewClient(server.URL, "bad-token")
+			client, _ := NewClientWithOptions(server.URL, "bad-token", true)
 			err := client.CheckToken(context.Background())
 			if !errors.Is(err, ErrUnauthorized) || !strings.Contains(err.Error(), "invalid service token") {
 				t.Fatalf("CheckToken() error = %v", err)
@@ -247,7 +247,12 @@ func TestPrivateAddressPolicy(t *testing.T) {
 	}))
 	defer server.Close()
 
-	blocked, err := NewClientWithOptions(server.URL, "token", false)
+	blockedServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("blocked private-address request reached the server")
+	}))
+	defer blockedServer.Close()
+
+	blocked, err := NewClientWithOptions(blockedServer.URL, "token", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,6 +272,28 @@ func TestPrivateAddressPolicy(t *testing.T) {
 	}
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("allowed request reached the server %d times, want 1", got)
+	}
+}
+
+func TestHTTPSchemePolicy(t *testing.T) {
+	httpServer := httptest.NewServer(http.NotFoundHandler())
+	defer httpServer.Close()
+	httpsServer := httptest.NewTLSServer(http.NotFoundHandler())
+	defer httpsServer.Close()
+
+	if _, err := NewClientWithOptions(httpServer.URL, "token", false); err == nil ||
+		err.Error() != "Auto Tournament URL must use https" {
+		t.Fatalf("HTTP URL without private access error = %v, want HTTPS requirement", err)
+	}
+	if _, err := NewClientWithOptions(httpServer.URL, "token", true); err != nil {
+		t.Fatalf("HTTP URL with private access enabled: %v", err)
+	}
+	if _, err := NewClientWithOptions(httpsServer.URL, "token", false); err != nil {
+		t.Fatalf("HTTPS URL without private access: %v", err)
+	}
+	if _, err := NewClient(httpServer.URL, "token"); err == nil ||
+		err.Error() != "Auto Tournament URL must use https" {
+		t.Fatalf("NewClient() HTTP error = %v, want HTTPS requirement", err)
 	}
 }
 

@@ -118,7 +118,7 @@ func NormalizeBaseURL(raw string) (string, error) {
 }
 
 func NewClient(baseURL, token string) (*Client, error) {
-	return NewClientWithOptions(baseURL, token, true)
+	return NewClientWithOptions(baseURL, token, false)
 }
 
 // NewClientWithOptions constructs an AT client with an explicit private-network policy.
@@ -126,6 +126,13 @@ func NewClientWithOptions(baseURL, token string, allowPrivate bool) (*Client, er
 	normalized, err := NormalizeBaseURL(baseURL)
 	if err != nil {
 		return nil, err
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Scheme == "http" && !allowPrivate {
+		return nil, errors.New("Auto Tournament URL must use https")
 	}
 	return &Client{
 		BaseURL:      normalized,

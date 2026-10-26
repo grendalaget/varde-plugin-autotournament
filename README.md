@@ -39,8 +39,8 @@ service. Do not put real credentials in the manifest.
 
 `AT_ALLOW_PRIVATE` defaults to `false`. Set it to `true` only for an
 intentionally private Auto Tournament endpoint, such as a development API on
-loopback. The Auto Tournament HTTP client still refuses redirects and uses a
-10-second request timeout.
+loopback. HTTPS is required unless `AT_ALLOW_PRIVATE=true`. The Auto Tournament
+HTTP client still refuses redirects and uses a 10-second request timeout.
 
 ## Configure a group
 
