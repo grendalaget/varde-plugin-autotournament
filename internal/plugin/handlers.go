@@ -53,9 +53,13 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unexpected plugin operation")
 		return
 	}
-	request, _, err := s.readEnvelope(w, r)
+	request, claims, err := s.readEnvelope(w, r)
 	if err != nil {
 		writeHandlerError(w, err)
+		return
+	}
+	if claims.Role != "admin" && claims.Role != "owner" {
+		writeError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	atURL, err := rawString(request.Settings["at_url"])
@@ -143,9 +147,13 @@ func (s *Service) handleDisable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unexpected plugin operation")
 		return
 	}
-	request, _, err := s.readEnvelope(w, r)
+	request, claims, err := s.readEnvelope(w, r)
 	if err != nil {
 		writeHandlerError(w, err)
+		return
+	}
+	if claims.Role != "admin" && claims.Role != "owner" {
+		writeError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if err := s.state.Delete(request.GroupID); err != nil {

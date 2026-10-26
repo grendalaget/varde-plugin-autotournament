@@ -49,6 +49,73 @@ func TestSettingsRejectsBadAutoTournamentToken(t *testing.T) {
 	}
 }
 
+func TestSettingsRequiresAdminOrOwner(t *testing.T) {
+	for _, role := range []string{"member", "admin", "owner"} {
+		t.Run(role, func(t *testing.T) {
+			var atCalls atomic.Int32
+			atServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atCalls.Add(1)
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/fleet/keys":
+					w.WriteHeader(http.StatusOK)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/fleet/keys":
+					_, _ = w.Write([]byte(`{"value":"new-fleet-key"}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer atServer.Close()
+			cpServer := httptest.NewServer(http.NotFoundHandler())
+			defer cpServer.Close()
+			service, store, secret := newTestService(t, cpServer.URL, nil)
+			previous := state.Group{
+				ATURL:      "https://previous.at.example.test",
+				ATToken:    "previous-token",
+				FleetKey:   "previous-fleet-key",
+				AcceptedAt: map[string]string{"server-1": "2026-01-01T00:00:00Z"},
+			}
+			if err := store.Save("group-1", previous); err != nil {
+				t.Fatal(err)
+			}
+
+			recorder := servePluginRequestWithRole(t, service, secret, "settings", role, map[string]any{
+				"group_id": "group-1",
+				"user":     map[string]string{"id": "user-1"},
+				"settings": map[string]string{
+					"at_url":   atServer.URL,
+					"at_token": "new-token",
+				},
+			})
+			if role == "member" {
+				if recorder.Code != http.StatusForbidden ||
+					!strings.Contains(recorder.Body.String(), "admin role required") {
+					t.Fatalf("member settings response = %d %s, want 403 admin role required", recorder.Code, recorder.Body)
+				}
+				got, ok := store.Get("group-1")
+				if !ok || !reflect.DeepEqual(got, previous) {
+					t.Fatalf("stored group after member settings = %#v, found=%v; want unchanged %#v", got, ok, previous)
+				}
+				if got := atCalls.Load(); got != 0 {
+					t.Fatalf("Auto Tournament calls for member settings = %d, want 0", got)
+				}
+				return
+			}
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("%s settings status = %d, want 200: %s", role, recorder.Code, recorder.Body)
+			}
+			got, ok := store.Get("group-1")
+			if !ok || got.ATURL != atServer.URL || got.ATToken != "new-token" ||
+				got.FleetKey != "new-fleet-key" {
+				t.Fatalf("stored group after %s settings = %#v, found=%v", role, got, ok)
+			}
+			if got := atCalls.Load(); got != 2 {
+				t.Fatalf("Auto Tournament calls for %s settings = %d, want 2", role, got)
+			}
+		})
+	}
+}
+
 func TestSettingsRejectsBadTokenWithoutReplacingStoredFleetKey(t *testing.T) {
 	var keyListCalls atomic.Int32
 	var createCalls atomic.Int32
@@ -364,6 +431,82 @@ func TestDisableReportsStateDeleteFailureAndKeepsGroupActive(t *testing.T) {
 	}
 }
 
+func TestDisableRequiresAdminOrOwner(t *testing.T) {
+	for _, role := range []string{"member", "admin", "owner"} {
+		t.Run(role, func(t *testing.T) {
+			var atCalls atomic.Int32
+			atServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atCalls.Add(1)
+				http.NotFound(w, r)
+			}))
+			defer atServer.Close()
+			cpServer := httptest.NewServer(http.NotFoundHandler())
+			defer cpServer.Close()
+			service, store, secret := newTestService(t, cpServer.URL, &ReadyUpPin{
+				URL:     "https://readyup.example.test/readyup.zip",
+				SHA256:  strings.Repeat("a", 64),
+				License: "commercial",
+			})
+			previous := state.Group{
+				ATURL:    atServer.URL,
+				ATToken:  "at-token",
+				FleetKey: "fleet-key",
+			}
+			if err := store.Save("group-1", previous); err != nil {
+				t.Fatal(err)
+			}
+			service.lastSpecHashes["group-1/server-1"] = "spec-hash"
+			service.warned400["group-1/server-1"] = true
+
+			recorder := servePluginRequestWithRole(t, service, secret, "disable", role, map[string]any{
+				"group_id": "group-1",
+				"user":     map[string]string{"id": "user-1"},
+			})
+			if role == "member" {
+				if recorder.Code != http.StatusForbidden ||
+					!strings.Contains(recorder.Body.String(), "admin role required") {
+					t.Fatalf("member disable response = %d %s, want 403 admin role required", recorder.Code, recorder.Body)
+				}
+				got, ok := store.Get("group-1")
+				if !ok || !reflect.DeepEqual(got, previous) {
+					t.Fatalf("stored group after member disable = %#v, found=%v; want unchanged %#v", got, ok, previous)
+				}
+				if service.lastSpecHashes["group-1/server-1"] != "spec-hash" ||
+					!service.warned400["group-1/server-1"] {
+					t.Fatal("member disable changed active addon reconcile state")
+				}
+				select {
+				case change := <-service.groupChanges:
+					t.Fatalf("member disable queued a group change: %#v", change)
+				default:
+				}
+			} else {
+				if recorder.Code != http.StatusOK {
+					t.Fatalf("%s disable status = %d, want 200: %s", role, recorder.Code, recorder.Body)
+				}
+				if _, ok := store.Get("group-1"); ok {
+					t.Fatalf("group state remains after %s disable", role)
+				}
+				if _, ok := service.lastSpecHashes["group-1/server-1"]; ok ||
+					service.warned400["group-1/server-1"] {
+					t.Fatalf("%s disable retained addon reconcile state", role)
+				}
+				select {
+				case change := <-service.groupChanges:
+					if change.groupID != "group-1" || change.enable {
+						t.Fatalf("%s disable queued group change %#v", role, change)
+					}
+				default:
+					t.Fatalf("%s disable did not queue a group change", role)
+				}
+			}
+			if got := atCalls.Load(); got != 0 {
+				t.Fatalf("Auto Tournament calls for %s disable = %d, want 0", role, got)
+			}
+		})
+	}
+}
+
 func newFleetKeyATServer(t *testing.T, key string, createCalls *atomic.Int32) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -378,6 +521,40 @@ func newFleetKeyATServer(t *testing.T, key string, createCalls *atomic.Int32) *h
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+func TestListTournamentsAllowsMembers(t *testing.T) {
+	var atCalls atomic.Int32
+	atServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/tournaments" {
+			http.NotFound(w, r)
+			return
+		}
+		atCalls.Add(1)
+		_, _ = w.Write([]byte(`{"tournaments":[]}`))
+	}))
+	defer atServer.Close()
+	cpServer := httptest.NewServer(http.NotFoundHandler())
+	defer cpServer.Close()
+	service, store, secret := newTestService(t, cpServer.URL, nil)
+	if err := store.Save("group-1", state.Group{
+		ATURL:    atServer.URL,
+		ATToken:  "at-token",
+		FleetKey: "fleet-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := servePluginRequestWithRole(t, service, secret, "list", "member", map[string]any{
+		"group_id": "group-1",
+		"user":     map[string]string{"id": "user-1"},
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("member tournament list status = %d, want 200: %s", recorder.Code, recorder.Body)
+	}
+	if got := atCalls.Load(); got != 1 {
+		t.Fatalf("Auto Tournament list calls = %d, want 1", got)
+	}
 }
 
 func TestCreateActionSelectionAndSkippedNotes(t *testing.T) {
@@ -476,7 +653,7 @@ func TestCreateActionSelectionAndSkippedNotes(t *testing.T) {
 				"players":   selected,
 			},
 		}
-		recorder := servePluginRequest(t, service, secret, "action:create", payload)
+		recorder := servePluginRequestWithRole(t, service, secret, "action:create", "member", payload)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("create action status = %d, want 200: %s", recorder.Code, recorder.Body)
 		}
@@ -592,6 +769,17 @@ func newTestServiceWithStateDir(
 }
 
 func servePluginRequest(t *testing.T, service *Service, secret []byte, operation string, payload any) *httptest.ResponseRecorder {
+	return servePluginRequestWithRole(t, service, secret, operation, "owner", payload)
+}
+
+func servePluginRequestWithRole(
+	t *testing.T,
+	service *Service,
+	secret []byte,
+	operation string,
+	role string,
+	payload any,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -599,7 +787,7 @@ func servePluginRequest(t *testing.T, service *Service, secret []byte, operation
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
 		GroupID: "group-1",
-		Role:    "owner",
+		Role:    role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "varde-control-plane",
 			Subject:   "user-1",
