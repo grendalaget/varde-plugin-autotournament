@@ -148,11 +148,14 @@ func (s *Service) handleDisable(w http.ResponseWriter, r *http.Request) {
 		writeHandlerError(w, err)
 		return
 	}
-	if err := s.state.Delete(request.GroupID); err != nil {
-		s.logger.Warn("delete disabled plugin group state", "group_id", request.GroupID, "error", err)
-	}
+	deleteErr := s.state.Delete(request.GroupID)
 	if s.readyUp != nil {
 		s.disableGroup(request.GroupID)
+	}
+	if deleteErr != nil {
+		s.logger.Error("delete disabled plugin group state", "group_id", request.GroupID, "error", deleteErr)
+		writeError(w, http.StatusInternalServerError, "could not disable plugin")
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -1,10 +1,13 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -301,6 +304,69 @@ func TestSettingsReusesFleetKeyHintForMatchingURL(t *testing.T) {
 	}
 }
 
+func TestDisableReportsStateDeleteFailureAndInvalidatesCache(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based state deletion failure cannot be tested as root")
+	}
+	cpServer := httptest.NewServer(http.NotFoundHandler())
+	defer cpServer.Close()
+	stateDir := t.TempDir()
+	service, store, secret := newTestServiceWithStateDir(t, cpServer.URL, &ReadyUpPin{
+		URL:     "https://readyup.example.test/readyup.zip",
+		SHA256:  strings.Repeat("a", 64),
+		License: "commercial",
+	}, stateDir)
+	if err := store.Save("group-1", state.Group{
+		ATURL:    "https://at.example.test",
+		ATToken:  "secret-at-token",
+		FleetKey: "fleet-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	service.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	service.lastSpecHashes["group-1/server-1"] = "spec-hash"
+	service.warned400["group-1/server-1"] = true
+
+	if err := os.Chmod(stateDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chmod(stateDir, 0o700); err != nil {
+			t.Errorf("restore state directory permissions: %v", err)
+		}
+	}()
+
+	recorder := servePluginRequest(t, service, secret, "disable", map[string]any{
+		"group_id": "group-1",
+		"user":     map[string]string{"id": "user-1"},
+	})
+	if recorder.Code != http.StatusInternalServerError || !strings.Contains(recorder.Body.String(), "could not disable plugin") {
+		t.Fatalf("disable response = %d %s, want 500 could not disable plugin", recorder.Code, recorder.Body)
+	}
+	if _, ok := store.Get("group-1"); !ok {
+		t.Fatal("group state was not restored after deletion failed")
+	}
+	if _, ok := service.lastSpecHashes["group-1/server-1"]; ok {
+		t.Fatal("disabled group's addon spec hash was retained after deletion failed")
+	}
+	if _, ok := service.warned400["group-1/server-1"]; ok {
+		t.Fatal("disabled group's warning state was retained after deletion failed")
+	}
+	if !strings.Contains(logs.String(), "level=ERROR") ||
+		strings.Contains(logs.String(), "secret-at-token") {
+		t.Fatalf("delete failure log = %q, want an error without secrets", logs.String())
+	}
+	select {
+	case change := <-service.groupChanges:
+		if change.groupID != "group-1" || change.enable {
+			t.Fatalf("group change = %#v", change)
+		}
+	default:
+		t.Fatal("disable event was not queued after deletion failed")
+	}
+}
+
 func newFleetKeyATServer(t *testing.T, key string, createCalls *atomic.Int32) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -496,9 +562,18 @@ func TestRawMemberIDs(t *testing.T) {
 }
 
 func newTestService(t *testing.T, cpURL string, pin *ReadyUpPin) (*Service, *state.Store, []byte) {
+	return newTestServiceWithStateDir(t, cpURL, pin, t.TempDir())
+}
+
+func newTestServiceWithStateDir(
+	t *testing.T,
+	cpURL string,
+	pin *ReadyUpPin,
+	stateDir string,
+) (*Service, *state.Store, []byte) {
 	t.Helper()
 	secret := []byte(strings.Repeat("plugin-secret-", 3))
-	store, err := state.Open(t.TempDir(), secret)
+	store, err := state.Open(stateDir, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
