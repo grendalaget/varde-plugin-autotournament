@@ -168,14 +168,25 @@ func serverPublicAddress(server varde.Server) string {
 	if server.Service == nil || server.Summary.Address == nil {
 		return ""
 	}
-	host, _, err := net.SplitHostPort(*server.Summary.Address)
+	address := *server.Summary.Address
+	host, addressPort, err := net.SplitHostPort(address)
 	if err != nil {
 		return ""
 	}
+	addressPortNumber, portErr := strconv.Atoi(addressPort)
+	firstUDPPort := 0
 	for _, gamePort := range server.Service.Ports {
 		if gamePort.Port > 0 && gamePort.Port <= 65535 && strings.EqualFold(gamePort.Protocol, "udp") {
-			return net.JoinHostPort(host, strconv.Itoa(gamePort.Port))
+			if firstUDPPort == 0 {
+				firstUDPPort = gamePort.Port
+			}
+			if portErr == nil && gamePort.Port == addressPortNumber {
+				return address
+			}
 		}
 	}
-	return ""
+	if firstUDPPort == 0 {
+		return ""
+	}
+	return net.JoinHostPort(host, strconv.Itoa(firstUDPPort))
 }

@@ -15,6 +15,45 @@ import (
 	"github.com/grendalaget/varde-plugin-autotournament/internal/varde"
 )
 
+func TestServerPublicAddressUsesMatchingUDPPortOrFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		ports   []varde.GamePort
+		want    string
+	}{
+		{
+			name:    "matching UDP port",
+			address: "127.77.0.5:27020",
+			ports: []varde.GamePort{
+				{Port: 27015, Protocol: "udp"},
+				{Port: 27020, Protocol: "UDP"},
+			},
+			want: "127.77.0.5:27020",
+		},
+		{
+			name:    "address port is TCP",
+			address: "127.77.0.5:25575",
+			ports: []varde.GamePort{
+				{Port: 25575, Protocol: "tcp"},
+				{Port: 27015, Protocol: "udp"},
+			},
+			want: "127.77.0.5:27015",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := varde.Server{
+				Service: &varde.Service{Ports: test.ports},
+			}
+			server.Summary.Address = &test.address
+			if got := serverPublicAddress(server); got != test.want {
+				t.Fatalf("serverPublicAddress() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestReconcileReadyUpAddonSpecAndSkipUnchanged(t *testing.T) {
 	var mu sync.Mutex
 	putCount := 0
