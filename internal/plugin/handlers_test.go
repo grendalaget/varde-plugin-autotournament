@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,8 +19,15 @@ import (
 
 func TestSettingsRejectsBadAutoTournamentToken(t *testing.T) {
 	atServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+		switch r.URL.Path {
+		case "/api/tournaments":
+			w.WriteHeader(http.StatusOK)
+		case "/api/fleet/keys":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer atServer.Close()
 	cpServer := httptest.NewServer(http.NotFoundHandler())
@@ -38,13 +46,72 @@ func TestSettingsRejectsBadAutoTournamentToken(t *testing.T) {
 	}
 }
 
+func TestSettingsRejectsBadTokenWithoutReplacingStoredFleetKey(t *testing.T) {
+	var keyListCalls atomic.Int32
+	var createCalls atomic.Int32
+	atServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tournaments":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/fleet/keys":
+			keyListCalls.Add(1)
+			if r.Header.Get("Authorization") != "Bearer bad-token" {
+				t.Errorf("fleet-key list authorization = %q, want bad-token bearer", r.Header.Get("Authorization"))
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/fleet/keys":
+			createCalls.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"value":"unexpected-fleet-key"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer atServer.Close()
+	cpServer := httptest.NewServer(http.NotFoundHandler())
+	defer cpServer.Close()
+	service, store, secret := newTestService(t, cpServer.URL, nil)
+	previous := state.Group{
+		ATURL:      "https://previous.at.example.test",
+		ATToken:    "previous-token",
+		FleetKey:   "stored-fleet-key",
+		AcceptedAt: map[string]string{"server-1": "2026-01-01T00:00:00Z"},
+	}
+	if err := store.Save("group-1", previous); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := servePluginRequest(t, service, secret, "settings", map[string]any{
+		"group_id": "group-1",
+		"user":     map[string]string{"id": "user-1"},
+		"settings": map[string]string{
+			"at_url":   atServer.URL,
+			"at_token": "bad-token",
+		},
+	})
+	if recorder.Code < 400 || recorder.Code >= 500 {
+		t.Fatalf("settings status = %d, want 4xx: %s", recorder.Code, recorder.Body)
+	}
+	got, ok := store.Get("group-1")
+	if !ok || !reflect.DeepEqual(got, previous) {
+		t.Fatalf("stored group after rejected token = %#v, found=%v; want unchanged %#v", got, ok, previous)
+	}
+	if got := keyListCalls.Load(); got != 1 {
+		t.Errorf("fleet-key list calls = %d, want 1", got)
+	}
+	if got := createCalls.Load(); got != 0 {
+		t.Errorf("CreateFleetKey calls = %d, want 0", got)
+	}
+}
+
 func TestSettingsCreatesFleetKeyOnce(t *testing.T) {
 	var mu sync.Mutex
 	createCalls := 0
 	createName := ""
 	atServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/tournaments":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/fleet/keys":
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/fleet/keys":
 			var request struct {

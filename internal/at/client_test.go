@@ -46,8 +46,15 @@ func TestClientRequests(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/fleet/keys":
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"value":"test-fleet-key"}`))
+			if r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"keys":[]}`))
+			} else if r.Method == http.MethodPost {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"value":"test-fleet-key"}`))
+			} else {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			}
 		case "/api/tournaments":
 			if r.Method == http.MethodGet {
 				_, _ = w.Write([]byte(`{"tournaments":[{"id":17,"name":"Existing","type":"swiss","status":"in_progress"}]}`))
@@ -67,7 +74,7 @@ func TestClientRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := client.Ping(ctx); err != nil {
+	if err := client.CheckToken(ctx); err != nil {
 		t.Fatal(err)
 	}
 	key, err := client.CreateFleetKey(ctx, "varde-test")
@@ -116,7 +123,7 @@ func TestClientRequests(t *testing.T) {
 		path   string
 		header string
 	}{
-		{http.MethodGet, "/api/tournaments", ""},
+		{http.MethodGet, "/api/fleet/keys", ""},
 		{http.MethodPost, "/api/fleet/keys", ""},
 		{http.MethodPost, "/api/players/bulk-import", ""},
 		{http.MethodPost, "/api/tournaments", ""},
@@ -199,16 +206,36 @@ func assertRequestJSON(t *testing.T, body []byte, want any) {
 	}
 }
 
-func TestUnauthorizedIsSentinelAndSurfacesATError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":"invalid service token"}`))
-	}))
-	defer server.Close()
-	client, _ := NewClient(server.URL, "bad-token")
-	err := client.Ping(context.Background())
-	if !errors.Is(err, ErrUnauthorized) || !strings.Contains(err.Error(), "invalid service token") {
-		t.Fatalf("Ping() error = %v", err)
+func TestCheckTokenRequiresAuthenticatedFleetKeyEndpoint(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized},
+		{name: "forbidden", status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/tournaments":
+					w.WriteHeader(http.StatusOK)
+				case "/api/fleet/keys":
+					if r.Header.Get("Authorization") != "Bearer bad-token" {
+						t.Errorf("fleet-key authorization = %q, want bad-token bearer", r.Header.Get("Authorization"))
+					}
+					w.WriteHeader(test.status)
+					_, _ = w.Write([]byte(`{"error":"invalid service token"}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			client, _ := NewClient(server.URL, "bad-token")
+			err := client.CheckToken(context.Background())
+			if !errors.Is(err, ErrUnauthorized) || !strings.Contains(err.Error(), "invalid service token") {
+				t.Fatalf("CheckToken() error = %v", err)
+			}
+		})
 	}
 }
 
@@ -224,8 +251,8 @@ func TestPrivateAddressPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := blocked.Ping(context.Background()); err == nil || err.Error() != privateNetworkError {
-		t.Fatalf("Ping() error = %v, want private-address policy error", err)
+	if err := blocked.CheckToken(context.Background()); err == nil || err.Error() != privateNetworkError {
+		t.Fatalf("CheckToken() error = %v, want private-address policy error", err)
 	}
 	if got := requests.Load(); got != 0 {
 		t.Fatalf("blocked request reached the server %d times", got)
@@ -235,8 +262,8 @@ func TestPrivateAddressPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := allowed.Ping(context.Background()); err != nil {
-		t.Fatalf("Ping() with private addresses enabled: %v", err)
+	if err := allowed.CheckToken(context.Background()); err != nil {
+		t.Fatalf("CheckToken() with private addresses enabled: %v", err)
 	}
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("allowed request reached the server %d times, want 1", got)
@@ -259,9 +286,9 @@ func TestRedirectIsNotFollowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = client.Ping(context.Background())
+	err = client.CheckToken(context.Background())
 	if err == nil || err.Error() != "auto tournament redirected; use the final URL" {
-		t.Fatalf("Ping() error = %v, want redirect error", err)
+		t.Fatalf("CheckToken() error = %v, want redirect error", err)
 	}
 	if got := destinationRequests.Load(); got != 0 {
 		t.Fatalf("redirect destination received %d requests, want 0", got)

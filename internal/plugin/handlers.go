@@ -78,7 +78,7 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := client.Ping(r.Context()); err != nil {
+	if err := client.CheckToken(r.Context()); err != nil {
 		if errors.Is(err, at.ErrUnauthorized) {
 			writeError(w, http.StatusBadRequest, "Auto Tournament rejected the token")
 			return

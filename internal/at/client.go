@@ -185,12 +185,12 @@ func isPrivateAddress(addr netip.Addr) bool {
 	return false
 }
 
-func (c *Client) Ping(ctx context.Context) error {
-	_, status, err := c.do(ctx, http.MethodGet, "/api/tournaments", nil, nil)
+func (c *Client) CheckToken(ctx context.Context) error {
+	_, status, err := c.do(ctx, http.MethodGet, "/api/fleet/keys", nil, nil)
 	if err != nil {
 		return err
 	}
-	if status != http.StatusOK {
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
 		return responseError(status, nil)
 	}
 	return nil
