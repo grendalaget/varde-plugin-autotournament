@@ -1,0 +1,82 @@
+{
+  "id": "autotournament",
+  "name": "Auto Tournament",
+  "version": "1.0.0",
+  "base_url": "http://127.0.0.1:7310",
+  "secret_env": "VARDE_PLUGIN_SECRET",
+  "service_token": "plugin-autotournament",
+  "settings": [
+    {
+      "name": "at_url",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "at_token",
+      "type": "secret",
+      "required": true
+    },
+    {
+      "name": "fleet_key",
+      "type": "string",
+      "hidden": true
+    }
+  ],
+  "pages": [
+    {
+      "id": "tournaments",
+      "title": "Tournaments",
+      "list": {
+        "endpoint": "/varde/tournaments"
+      },
+      "actions": [
+        {
+          "id": "create",
+          "title": "Create tournament",
+          "endpoint": "/varde/tournaments",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "format",
+              "type": "select",
+              "default": "shuffle",
+              "options": [
+                "shuffle",
+                "single_elimination",
+                "double_elimination"
+              ]
+            },
+            {
+              "name": "team_size",
+              "type": "int",
+              "default": 5
+            },
+            {
+              "name": "maps",
+              "type": "multiselect",
+              "default": [
+                "de_mirage",
+                "de_inferno",
+                "de_nuke"
+              ],
+              "options": [
+                "de_mirage",
+                "de_inferno",
+                "de_nuke"
+              ]
+            },
+            {
+              "name": "players",
+              "type": "member_multiselect",
+              "requires": "steam_id"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
