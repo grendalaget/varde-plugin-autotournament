@@ -205,6 +205,36 @@ func TestReadyUpFleetConfigOmitsUnknownAddress(t *testing.T) {
 	}
 }
 
+func TestRenderFleetConfigEnablesInsecureOnlyForHTTP(t *testing.T) {
+	tests := []struct {
+		name         string
+		atURL        string
+		wantInsecure bool
+	}{
+		{name: "http", atURL: "http://at.example", wantInsecure: true},
+		{name: "case-insensitive http scheme", atURL: "HTTP://at.example", wantInsecure: true},
+		{name: "https", atURL: "https://at.example"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := renderFleetConfig(tt.atURL, "fleet", "")
+			if err != nil {
+				t.Fatalf("renderFleetConfig(%q) error = %v", tt.atURL, err)
+			}
+			gotInsecure := strings.Contains(config, "insecure = 1\n")
+			if gotInsecure != tt.wantInsecure {
+				t.Errorf("renderFleetConfig(%q) insecure = %t, want %t; config:\n%s", tt.atURL, gotInsecure, tt.wantInsecure, config)
+			}
+			if gotInsecure && strings.Index(config, "insecure = 1\n") > strings.Index(config, "enabled = 1\n") {
+				t.Errorf("renderFleetConfig(%q) put insecure after enabled; config:\n%s", tt.atURL, config)
+			}
+			if !tt.wantInsecure && strings.Contains(config, "insecure") {
+				t.Errorf("renderFleetConfig(%q) unexpectedly contains insecure; config:\n%s", tt.atURL, config)
+			}
+		})
+	}
+}
+
 func reflectSearchPath(value any) bool {
 	paths, ok := value.([]any)
 	return ok && len(paths) == 1 && paths[0] == "csgo/readyup"

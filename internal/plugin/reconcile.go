@@ -153,12 +153,19 @@ func renderFleetConfig(atURL, fleetKey, publicAddress string) (string, error) {
 			return "", fmt.Errorf("%s contains a line break", name)
 		}
 	}
+	parsedURL, err := url.Parse(atURL)
+	if err != nil {
+		return "", fmt.Errorf("parse Auto Tournament URL: %w", err)
+	}
 	lines := []string{
 		"url = " + atURL,
 		"enroll_key = " + fleetKey,
 	}
 	if publicAddress != "" {
 		lines = append(lines, "public_addr = "+publicAddress)
+	}
+	if strings.EqualFold(parsedURL.Scheme, "http") {
+		lines = append(lines, "insecure = 1")
 	}
 	lines = append(lines, "enabled = 1")
 	return strings.Join(lines, "\n") + "\n", nil

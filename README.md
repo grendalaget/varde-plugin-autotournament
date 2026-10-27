@@ -83,6 +83,9 @@ It requests the `game` target, which the CS2 driver maps to the server's
 and supplies `cfg/ReadyUp/fleet.cfg` and `cfg/ReadyUp/license.cfg`. The fleet
 file uses Ready Up's documented `key = value` format. A public address is
 written only when Varde exposes a mesh address and a matching UDP game port.
+For an HTTP Auto Tournament URL (allowed only with `AT_ALLOW_PRIVATE=true`),
+the plugin sets `insecure = 1`, so the enrollment key travels unencrypted; use
+HTTPS outside a trusted LAN.
 
 Reconciliation runs on startup, after the settings hook, every five minutes,
 and on the group's `server.created` SSE event. It does not depend on a
