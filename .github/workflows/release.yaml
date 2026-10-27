@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32
+        with:
+          go-version-file: go.mod
+      - name: Build release archives
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          targets=(
+            linux/amd64
+            linux/arm64
+            darwin/amd64
+            darwin/arm64
+            windows/amd64
+            windows/arm64
+          )
+          for target in "${targets[@]}"; do
+            IFS=/ read -r goos goarch <<< "$target"
+            binary_name=varde-plugin-autotournament
+            if [[ "$goos" == windows ]]; then
+              binary_name="${binary_name}.exe"
+            fi
+            package_dir="$workdir/${goos}-${goarch}"
+            mkdir -p "$package_dir"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+              go build -trimpath -ldflags "-s -w -X main.version=${TAG#v}" \
+              -o "$package_dir/$binary_name" ./cmd/varde-plugin-autotournament
+            jq --arg version "${TAG#v}" '.version = $version' manifest.example.json \
+              > "$package_dir/manifest.json"
+            cp LICENSE README.md "$package_dir/"
+            archive="dist/varde-plugin-autotournament-${TAG#v}-${goos}-${goarch}.tar.gz"
+            tar -czf "$archive" -C "$package_dir" \
+              "$binary_name" manifest.json LICENSE README.md
+          done
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes

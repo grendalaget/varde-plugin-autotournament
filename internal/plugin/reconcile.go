@@ -29,10 +29,11 @@ func validateReadyUpPin(pin ReadyUpPin) error {
 	if _, err := hex.DecodeString(pin.SHA256); err != nil {
 		return errors.New("READYUP_SHA256 must be a lowercase 64-character SHA-256 digest")
 	}
-	if pin.License != "noncommercial" && pin.License != "commercial" {
-		return errors.New("READYUP_LICENSE must be exactly noncommercial or commercial")
-	}
 	return nil
+}
+
+func validReadyUpLicense(value string) bool {
+	return value == "noncommercial" || value == "commercial"
 }
 
 func (s *Service) ReconcileAll(ctx context.Context) error {
@@ -64,6 +65,14 @@ func (s *Service) ReconcileGroup(ctx context.Context, groupID string) error {
 }
 
 func (s *Service) reconcileGroup(ctx context.Context, groupID string, group state.Group) error {
+	if !validReadyUpLicense(group.ReadyUpLicense) {
+		if !s.warnedLicense[groupID] {
+			s.logger.Warn("Ready Up license is not configured or invalid for group; skipping addon reconciliation",
+				"group_id", groupID)
+			s.warnedLicense[groupID] = true
+		}
+		return nil
+	}
 	servers, err := s.varde.ListServers(ctx, groupID)
 	if err != nil {
 		return fmt.Errorf("list group servers: %w", err)
@@ -123,13 +132,16 @@ func (s *Service) reconcileGroup(ctx context.Context, groupID string, group stat
 }
 
 func buildReadyUpSpec(group state.Group, server varde.Server, acceptedAt string, pin ReadyUpPin) (varde.AddonSpec, error) {
+	if !validReadyUpLicense(group.ReadyUpLicense) {
+		return varde.AddonSpec{}, errors.New("Ready Up license must be noncommercial or commercial")
+	}
 	fleetConfig, err := renderFleetConfig(group.ATURL, group.FleetKey, serverPublicAddress(server))
 	if err != nil {
 		return varde.AddonSpec{}, err
 	}
 	licenseConfig := fmt.Sprintf(
 		"readyup_license_accepted %q\nreadyup_license_accepted_at %q\n",
-		pin.License,
+		group.ReadyUpLicense,
 		acceptedAt,
 	)
 	return varde.AddonSpec{

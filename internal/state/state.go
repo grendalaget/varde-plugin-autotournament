@@ -23,10 +23,11 @@ const (
 )
 
 type Group struct {
-	ATURL      string
-	ATToken    string
-	FleetKey   string
-	AcceptedAt map[string]string
+	ATURL          string
+	ATToken        string
+	FleetKey       string
+	ReadyUpLicense string
+	AcceptedAt     map[string]string
 }
 
 type sealedValue struct {
@@ -34,10 +35,11 @@ type sealedValue struct {
 }
 
 type diskGroup struct {
-	ATURL      string            `json:"at_url"`
-	ATToken    sealedValue       `json:"at_token"`
-	FleetKey   sealedValue       `json:"fleet_key"`
-	AcceptedAt map[string]string `json:"accepted_at,omitempty"`
+	ATURL          string            `json:"at_url"`
+	ATToken        sealedValue       `json:"at_token"`
+	FleetKey       sealedValue       `json:"fleet_key"`
+	ReadyUpLicense string            `json:"readyup_license,omitempty"`
+	AcceptedAt     map[string]string `json:"accepted_at,omitempty"`
 }
 
 type Store struct {
@@ -94,10 +96,11 @@ func (s *Store) load() error {
 			return fmt.Errorf("decrypt fleet key for group %q: %w", groupID, err)
 		}
 		s.groups[groupID] = Group{
-			ATURL:      item.ATURL,
-			ATToken:    token,
-			FleetKey:   fleetKey,
-			AcceptedAt: cloneMap(item.AcceptedAt),
+			ATURL:          item.ATURL,
+			ATToken:        token,
+			FleetKey:       fleetKey,
+			ReadyUpLicense: item.ReadyUpLicense,
+			AcceptedAt:     cloneMap(item.AcceptedAt),
 		}
 	}
 	if err := os.Chmod(s.path, 0o600); err != nil {
@@ -191,10 +194,11 @@ func (s *Store) writeLocked() error {
 			return fmt.Errorf("encrypt fleet key: %w", err)
 		}
 		disk[groupID] = diskGroup{
-			ATURL:      group.ATURL,
-			ATToken:    token,
-			FleetKey:   fleetKey,
-			AcceptedAt: cloneMap(group.AcceptedAt),
+			ATURL:          group.ATURL,
+			ATToken:        token,
+			FleetKey:       fleetKey,
+			ReadyUpLicense: group.ReadyUpLicense,
+			AcceptedAt:     cloneMap(group.AcceptedAt),
 		}
 	}
 	data, err := json.MarshalIndent(disk, "", "  ")

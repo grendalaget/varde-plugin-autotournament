@@ -16,9 +16,8 @@ import (
 )
 
 type ReadyUpPin struct {
-	URL     string
-	SHA256  string
-	License string
+	URL    string
+	SHA256 string
 }
 
 type Config struct {
@@ -51,6 +50,7 @@ type Service struct {
 	reconcileMu    sync.Mutex
 	lastSpecHashes map[string]string
 	warned400      map[string]bool
+	warnedLicense  map[string]bool
 }
 
 func New(cfg Config) (*Service, error) {
@@ -80,6 +80,7 @@ func New(cfg Config) (*Service, error) {
 		reconcileWake:  make(chan struct{}, 1),
 		lastSpecHashes: make(map[string]string),
 		warned400:      make(map[string]bool),
+		warnedLicense:  make(map[string]bool),
 	}, nil
 }
 
@@ -104,6 +105,10 @@ func (s *Service) Wait() {
 
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 	mux.HandleFunc("POST /varde/v1/settings", s.handleSettings)
 	mux.HandleFunc("POST /varde/v1/disable", s.handleDisable)
 	mux.HandleFunc("POST /varde/tournaments", s.handleTournaments)
@@ -221,6 +226,7 @@ func (s *Service) disableGroup(groupID string) {
 			delete(s.warned400, key)
 		}
 	}
+	delete(s.warnedLicense, groupID)
 	s.reconcileMu.Unlock()
 	s.groupChanges <- groupChange{groupID: groupID}
 }

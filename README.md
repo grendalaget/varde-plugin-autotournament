@@ -14,6 +14,13 @@ or schemas are included here.
 - Go 1.26 or newer.
 - A persistent, private directory for encrypted plugin state.
 
+## Install
+
+One-click installation through Varde is coming. For now, download the release
+archive for your operating system and architecture, extract it, and run the
+included binary with the environment below. The archive includes
+`manifest.json`, `LICENSE`, and this README. You can also build from source:
+
 Build and run:
 
 ```sh
@@ -25,6 +32,9 @@ export STATE_DIR="/var/lib/varde-plugin-autotournament"
 export LISTEN="127.0.0.1:7310"
 ./varde-plugin-autotournament
 ```
+
+Run `./varde-plugin-autotournament --version` to print the build version.
+Startup logs include the same version; source builds report `dev`.
 
 The value of `VARDE_PLUGIN_SECRET` must match the manifest's `secret_env` and
 contain at least 32 bytes. Keep it stable: it derives the AES-256-GCM key used
@@ -68,17 +78,21 @@ service requires a separate license from Auto Tournament.
 
 ## Ready Up server addon
 
-Ready Up addon management is disabled unless **all three** values are set:
+Ready Up addon management is on by default and uses this pinned release:
 
-- `READYUP_URL`: HTTPS URL of the pinned Ready Up release ZIP.
-- `READYUP_SHA256`: lowercase SHA-256 digest of that ZIP.
-- `READYUP_LICENSE`: exactly `noncommercial` or `commercial`, matching the
-  applicable Ready Up license terms.
+- URL: `https://github.com/Auto-Tournament/ready-up/releases/download/v0.1.0-beta.77/ready-up-full-0.1.0-beta.77-linuxsteamrt64.zip`
+- SHA-256: `b260c55eaff68cf90d09caa95b6311ad0cf1a8919be7c557064b01bdf1ce295e`
 
-There is no default license choice. If any pin value is missing, startup logs
-that addon management is disabled. With all values configured, the plugin
-manages `autotournament/readyup` only for servers whose `game_id` is `cs2`.
-It requests the `game` target, which the CS2 driver maps to the server's
+Set `READYUP_URL` and `READYUP_SHA256` together to override the pin; setting
+only one makes startup fail. Set `READYUP_DISABLED=true` to disable addon
+management. The old `READYUP_LICENSE` environment variable is ignored with a
+startup warning.
+
+Each group must choose `readyup_license` as either `noncommercial` or
+`commercial` in the plugin settings. There is no default. Until a group has a
+valid choice, its addon reconciliation is skipped and a warning is logged once.
+The plugin manages `autotournament/readyup` only for servers whose `game_id` is
+`cs2`. It requests the `game` target, which the CS2 driver maps to the server's
 `game/csgo` folder (CS2 kept that folder name), extracts the release ZIP there,
 and supplies `cfg/ReadyUp/fleet.cfg` and `cfg/ReadyUp/license.cfg`. The fleet
 file uses Ready Up's documented `key = value` format. A public address is
@@ -114,16 +128,18 @@ the rejection is logged once for that server.
 
 ## State and operation
 
-Each group's Auto Tournament URL, token, fleet key, and per-server license
-timestamps are kept in `STATE_DIR/groups.json`. The token and fleet key use
-AES-256-GCM with a key derived by HKDF-SHA256 from `VARDE_PLUGIN_SECRET`; the
-associated data is `<group_id>/<field>`. Back up the state file and secret
-together. Losing either makes saved credentials unusable.
+Each group's Auto Tournament URL, token, fleet key, Ready Up license, and
+per-server license timestamps are kept in `STATE_DIR/groups.json`. The token
+and fleet key use AES-256-GCM with a key derived by HKDF-SHA256 from
+`VARDE_PLUGIN_SECRET`; the associated data is `<group_id>/<field>`. Back up the
+state file and secret together. Losing either makes saved credentials
+unusable.
 
 The service starts on `127.0.0.1:7310` unless `LISTEN` is set. It reconnects
 to group event streams with `Last-Event-ID` and exponential backoff. No
 Auto Tournament token, service token, plugin secret, or fleet key is written
-to logs.
+to logs. `GET /healthz` returns `200` with `ok` without authentication; the
+other plugin routes retain their existing authentication.
 
 ## Development
 

@@ -17,6 +17,15 @@
       "required": true
     },
     {
+      "name": "readyup_license",
+      "type": "select",
+      "options": [
+        "noncommercial",
+        "commercial"
+      ],
+      "required": true
+    },
+    {
       "name": "fleet_key",
       "type": "string",
       "hidden": true

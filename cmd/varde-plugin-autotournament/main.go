@@ -18,7 +18,13 @@ import (
 	"github.com/grendalaget/varde-plugin-autotournament/internal/varde"
 )
 
+var version = "dev"
+
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version)
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("Auto Tournament plugin stopped", "error", err)
 		os.Exit(1)
@@ -26,6 +32,10 @@ func main() {
 }
 
 func run() error {
+	slog.Info("Auto Tournament plugin starting", "version", version)
+	if _, ok := os.LookupEnv("READYUP_LICENSE"); ok {
+		slog.Warn("READYUP_LICENSE is ignored; configure readyup_license in each group")
+	}
 	secret := []byte(os.Getenv("VARDE_PLUGIN_SECRET"))
 	if len(secret) < 32 {
 		return errors.New("VARDE_PLUGIN_SECRET must contain at least 32 bytes")
@@ -55,12 +65,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configure Varde client: %w", err)
 	}
-	readyUp, err := readyUpPinFromEnv()
+	readyUp, err := plugin.ReadyUpPinFromEnv()
 	if err != nil {
 		return err
 	}
 	if readyUp == nil {
-		slog.Info("Ready Up addon management disabled: READYUP_URL, READYUP_SHA256, and READYUP_LICENSE must all be configured")
+		slog.Info("Ready Up addon management disabled")
 	}
 	service, err := plugin.New(plugin.Config{
 		Secret:         secret,
@@ -104,19 +114,6 @@ func run() error {
 		}
 		return fmt.Errorf("serve plugin: %w", err)
 	}
-}
-
-func readyUpPinFromEnv() (*plugin.ReadyUpPin, error) {
-	values := []string{
-		strings.TrimSpace(os.Getenv("READYUP_URL")),
-		strings.TrimSpace(os.Getenv("READYUP_SHA256")),
-		strings.TrimSpace(os.Getenv("READYUP_LICENSE")),
-	}
-	if values[0] == "" || values[1] == "" || values[2] == "" {
-		return nil, nil
-	}
-	pin := &plugin.ReadyUpPin{URL: values[0], SHA256: values[1], License: values[2]}
-	return pin, nil
 }
 
 func envBool(name string, defaultValue bool) (bool, error) {

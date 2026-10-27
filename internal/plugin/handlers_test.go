@@ -40,12 +40,49 @@ func TestSettingsRejectsBadAutoTournamentToken(t *testing.T) {
 		"group_id": "group-1",
 		"user":     map[string]string{"id": "user-1"},
 		"settings": map[string]string{
-			"at_url":   atServer.URL,
-			"at_token": "bad-token",
+			"at_url":          atServer.URL,
+			"at_token":        "bad-token",
+			"readyup_license": "noncommercial",
 		},
 	})
 	if recorder.Code < 400 || recorder.Code >= 500 {
 		t.Fatalf("settings status = %d, want 4xx: %s", recorder.Code, recorder.Body)
+	}
+}
+
+func TestSettingsRejectsMissingOrInvalidReadyUpLicense(t *testing.T) {
+	cpServer := httptest.NewServer(http.NotFoundHandler())
+	defer cpServer.Close()
+	service, _, secret := newTestService(t, cpServer.URL, nil)
+	for _, test := range []struct {
+		name     string
+		settings map[string]string
+	}{
+		{
+			name: "missing",
+			settings: map[string]string{
+				"at_url": "https://at.example.test", "at_token": "token",
+			},
+		},
+		{
+			name: "invalid",
+			settings: map[string]string{
+				"at_url": "https://at.example.test", "at_token": "token",
+				"readyup_license": "community",
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := servePluginRequest(t, service, secret, "settings", map[string]any{
+				"group_id": "group-1",
+				"user":     map[string]string{"id": "user-1"},
+				"settings": test.settings,
+			})
+			if recorder.Code != http.StatusBadRequest ||
+				!strings.Contains(recorder.Body.String(), "Ready Up license must be") {
+				t.Fatalf("settings response = %d %s, want license validation error", recorder.Code, recorder.Body)
+			}
+		})
 	}
 }
 
@@ -82,8 +119,9 @@ func TestSettingsRequiresAdminOrOwner(t *testing.T) {
 				"group_id": "group-1",
 				"user":     map[string]string{"id": "user-1"},
 				"settings": map[string]string{
-					"at_url":   atServer.URL,
-					"at_token": "new-token",
+					"at_url":          atServer.URL,
+					"at_token":        "new-token",
+					"readyup_license": "commercial",
 				},
 			})
 			if role == "member" {
@@ -106,7 +144,7 @@ func TestSettingsRequiresAdminOrOwner(t *testing.T) {
 			}
 			got, ok := store.Get("group-1")
 			if !ok || got.ATURL != atServer.URL || got.ATToken != "new-token" ||
-				got.FleetKey != "new-fleet-key" {
+				got.FleetKey != "new-fleet-key" || got.ReadyUpLicense != "commercial" {
 				t.Fatalf("stored group after %s settings = %#v, found=%v", role, got, ok)
 			}
 			if got := atCalls.Load(); got != 2 {
@@ -156,8 +194,9 @@ func TestSettingsRejectsBadTokenWithoutReplacingStoredFleetKey(t *testing.T) {
 		"group_id": "group-1",
 		"user":     map[string]string{"id": "user-1"},
 		"settings": map[string]string{
-			"at_url":   atServer.URL,
-			"at_token": "bad-token",
+			"at_url":          atServer.URL,
+			"at_token":        "bad-token",
+			"readyup_license": "commercial",
 		},
 	})
 	if recorder.Code < 400 || recorder.Code >= 500 {
@@ -211,8 +250,9 @@ func TestSettingsCreatesFleetKeyOnce(t *testing.T) {
 		"group_id": "group-1",
 		"user":     map[string]string{"id": "user-1"},
 		"settings": map[string]string{
-			"at_url":   atServer.URL,
-			"at_token": "at-token",
+			"at_url":          atServer.URL,
+			"at_token":        "at-token",
+			"readyup_license": "noncommercial",
 		},
 	}
 	for range 2 {
@@ -240,7 +280,7 @@ func TestSettingsCreatesFleetKeyOnce(t *testing.T) {
 		t.Fatalf("fleet-key name = %q", createName)
 	}
 	group, ok := store.Get("group-1")
-	if !ok || group.FleetKey != "fleet-key-from-at" {
+	if !ok || group.FleetKey != "fleet-key-from-at" || group.ReadyUpLicense != "noncommercial" {
 		t.Fatalf("saved group = %#v, found=%v", group, ok)
 	}
 }
@@ -270,8 +310,9 @@ func TestSettingsRecreatesFleetKeyWhenATURLChanges(t *testing.T) {
 		"group_id": "group-1",
 		"user":     map[string]string{"id": "user-1"},
 		"settings": map[string]string{
-			"at_url":   newServer.URL,
-			"at_token": "new-token",
+			"at_url":          newServer.URL,
+			"at_token":        "new-token",
+			"readyup_license": "noncommercial",
 		},
 	})
 	if recorder.Code != http.StatusOK {
@@ -311,10 +352,11 @@ func TestSettingsIgnoresFleetKeyHintForDifferentURL(t *testing.T) {
 		"group_id": "group-1",
 		"user":     map[string]string{"id": "user-1"},
 		"settings": map[string]string{
-			"at_url":        atServer.URL,
-			"at_token":      "at-token",
-			"fleet_key":     "stale-fleet-key",
-			"fleet_key_url": "https://old-at.example.test",
+			"at_url":          atServer.URL,
+			"at_token":        "at-token",
+			"readyup_license": "commercial",
+			"fleet_key":       "stale-fleet-key",
+			"fleet_key_url":   "https://old-at.example.test",
 		},
 	})
 	if recorder.Code != http.StatusOK {
@@ -347,10 +389,11 @@ func TestSettingsReusesFleetKeyHintForMatchingURL(t *testing.T) {
 		"group_id": "group-1",
 		"user":     map[string]string{"id": "user-1"},
 		"settings": map[string]string{
-			"at_url":        atServer.URL,
-			"at_token":      "at-token",
-			"fleet_key":     "matching-fleet-key",
-			"fleet_key_url": atServer.URL + "/",
+			"at_url":          atServer.URL,
+			"at_token":        "at-token",
+			"readyup_license": "noncommercial",
+			"fleet_key":       "matching-fleet-key",
+			"fleet_key_url":   atServer.URL + "/",
 		},
 	})
 	if recorder.Code != http.StatusOK {
@@ -379,9 +422,8 @@ func TestDisableReportsStateDeleteFailureAndKeepsGroupActive(t *testing.T) {
 	defer cpServer.Close()
 	stateDir := t.TempDir()
 	service, store, secret := newTestServiceWithStateDir(t, cpServer.URL, &ReadyUpPin{
-		URL:     "https://readyup.example.test/readyup.zip",
-		SHA256:  strings.Repeat("a", 64),
-		License: "commercial",
+		URL:    "https://readyup.example.test/readyup.zip",
+		SHA256: strings.Repeat("a", 64),
 	}, stateDir)
 	if err := store.Save("group-1", state.Group{
 		ATURL:    "https://at.example.test",
@@ -443,9 +485,8 @@ func TestDisableRequiresAdminOrOwner(t *testing.T) {
 			cpServer := httptest.NewServer(http.NotFoundHandler())
 			defer cpServer.Close()
 			service, store, secret := newTestService(t, cpServer.URL, &ReadyUpPin{
-				URL:     "https://readyup.example.test/readyup.zip",
-				SHA256:  strings.Repeat("a", 64),
-				License: "commercial",
+				URL:    "https://readyup.example.test/readyup.zip",
+				SHA256: strings.Repeat("a", 64),
 			})
 			previous := state.Group{
 				ATURL:    atServer.URL,

@@ -16,10 +16,11 @@ func TestEncryptedStateRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Group{
-		ATURL:      "https://at.example",
-		ATToken:    "auto-token-value",
-		FleetKey:   "fleet-key-value",
-		AcceptedAt: map[string]string{"server-1": "2025-01-02T03:04:05Z"},
+		ATURL:          "https://at.example",
+		ATToken:        "auto-token-value",
+		FleetKey:       "fleet-key-value",
+		ReadyUpLicense: "noncommercial",
+		AcceptedAt:     map[string]string{"server-1": "2025-01-02T03:04:05Z"},
 	}
 	if err := store.Save("group-1", want); err != nil {
 		t.Fatal(err)
@@ -50,6 +51,7 @@ func TestEncryptedStateRoundTrip(t *testing.T) {
 		t.Fatal("saved group not found after reopening")
 	}
 	if got.ATURL != want.ATURL || got.ATToken != want.ATToken || got.FleetKey != want.FleetKey ||
+		got.ReadyUpLicense != want.ReadyUpLicense ||
 		got.AcceptedAt["server-1"] != want.AcceptedAt["server-1"] {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/grendalaget/varde-plugin-autotournament/internal/state"
@@ -92,15 +93,15 @@ func TestReconcileReadyUpAddonSpecAndSkipUnchanged(t *testing.T) {
 	defer cpServer.Close()
 
 	pin := &ReadyUpPin{
-		URL:     "https://releases.example.test/readyup.zip",
-		SHA256:  strings.Repeat("a", 64),
-		License: "noncommercial",
+		URL:    "https://releases.example.test/readyup.zip",
+		SHA256: strings.Repeat("a", 64),
 	}
 	service, store, _ := newTestService(t, cpServer.URL, pin)
 	if err := store.Save("group-1", state.Group{
-		ATURL:    "https://at.example.test",
-		ATToken:  "at-token",
-		FleetKey: "fleet-key",
+		ATURL:          "https://at.example.test",
+		ATToken:        "at-token",
+		FleetKey:       "fleet-key",
+		ReadyUpLicense: "noncommercial",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -110,22 +111,24 @@ func TestReconcileReadyUpAddonSpecAndSkipUnchanged(t *testing.T) {
 		}
 	}
 	mu.Lock()
-	defer mu.Unlock()
 	if putCount != 1 {
+		mu.Unlock()
 		t.Fatalf("addon PUT count = %d, want 1", putCount)
 	}
-	if received.URL != pin.URL || received.SHA256 != pin.SHA256 ||
-		received.Archive != "zip" || received.Target != "game" {
-		t.Fatalf("addon pin = %#v", received)
+	initial := received
+	mu.Unlock()
+	if initial.URL != pin.URL || initial.SHA256 != pin.SHA256 ||
+		initial.Archive != "zip" || initial.Target != "game" {
+		t.Fatalf("addon pin = %#v", initial)
 	}
-	if !reflectSearchPath(received.DriverOptions["gameinfo_search_paths"]) {
-		t.Fatalf("driver options = %#v", received.DriverOptions)
+	if !reflectSearchPath(initial.DriverOptions["gameinfo_search_paths"]) {
+		t.Fatalf("driver options = %#v", initial.DriverOptions)
 	}
-	if received.Files["cfg/ReadyUp/fleet.cfg"] !=
+	if initial.Files["cfg/ReadyUp/fleet.cfg"] !=
 		"url = https://at.example.test\nenroll_key = fleet-key\npublic_addr = 127.77.0.5:27015\nenabled = 1\n" {
-		t.Fatalf("fleet config = %q", received.Files["cfg/ReadyUp/fleet.cfg"])
+		t.Fatalf("fleet config = %q", initial.Files["cfg/ReadyUp/fleet.cfg"])
 	}
-	license := received.Files["cfg/ReadyUp/license.cfg"]
+	license := initial.Files["cfg/ReadyUp/license.cfg"]
 	if !strings.HasPrefix(license, "readyup_license_accepted \"noncommercial\"\nreadyup_license_accepted_at \"") ||
 		!strings.HasSuffix(license, "\"\n") {
 		t.Fatalf("license config = %q", license)
@@ -136,6 +139,24 @@ func TestReconcileReadyUpAddonSpecAndSkipUnchanged(t *testing.T) {
 	}
 	if !strings.Contains(license, group.AcceptedAt["server-cs2"]) {
 		t.Fatalf("license config timestamp does not match persisted state: %q", license)
+	}
+
+	group.ReadyUpLicense = "commercial"
+	if err := store.Save("group-1", group); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ReconcileGroup(context.Background(), "group-1"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if putCount != 2 {
+		t.Fatalf("addon PUT count after licence change = %d, want 2", putCount)
+	}
+	license = received.Files["cfg/ReadyUp/license.cfg"]
+	if !strings.HasPrefix(license, "readyup_license_accepted \"commercial\"\nreadyup_license_accepted_at \"") ||
+		!strings.Contains(license, group.AcceptedAt["server-cs2"]) {
+		t.Fatalf("updated license config = %q", license)
 	}
 }
 
@@ -167,12 +188,16 @@ func TestReconcile400IsNonfatalAndLoggedOnce(t *testing.T) {
 
 	var logs bytes.Buffer
 	service, store, _ := newTestService(t, cpServer.URL, &ReadyUpPin{
-		URL:     "https://releases.example.test/readyup.zip",
-		SHA256:  strings.Repeat("b", 64),
-		License: "commercial",
+		URL:    "https://releases.example.test/readyup.zip",
+		SHA256: strings.Repeat("b", 64),
 	})
 	service.logger = slog.New(slog.NewTextHandler(&logs, nil))
-	if err := store.Save("group-1", state.Group{ATURL: "https://at.example", ATToken: "token", FleetKey: "fleet"}); err != nil {
+	if err := store.Save("group-1", state.Group{
+		ATURL:          "https://at.example",
+		ATToken:        "token",
+		FleetKey:       "fleet",
+		ReadyUpLicense: "commercial",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -190,12 +215,48 @@ func TestReconcile400IsNonfatalAndLoggedOnce(t *testing.T) {
 	}
 }
 
+func TestReconcileSkipsUnlicensedGroupAndWarnsOnce(t *testing.T) {
+	var listRequests atomic.Int32
+	cpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/groups/group-1/servers" {
+			listRequests.Add(1)
+		}
+		http.NotFound(w, r)
+	}))
+	defer cpServer.Close()
+
+	var logs bytes.Buffer
+	service, store, _ := newTestService(t, cpServer.URL, &ReadyUpPin{
+		URL:    "https://releases.example.test/readyup.zip",
+		SHA256: strings.Repeat("d", 64),
+	})
+	service.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	if err := store.Save("group-1", state.Group{
+		ATURL:    "https://at.example",
+		ATToken:  "token",
+		FleetKey: "fleet",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := service.ReconcileGroup(context.Background(), "group-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := listRequests.Load(); got != 0 {
+		t.Fatalf("server list requests for unlicensed group = %d, want 0", got)
+	}
+	if got := strings.Count(logs.String(), "Ready Up license is not configured or invalid for group"); got != 1 {
+		t.Fatalf("unlicensed group warning count = %d, want 1: %s", got, logs.String())
+	}
+}
+
 func TestReadyUpFleetConfigOmitsUnknownAddress(t *testing.T) {
 	spec, err := buildReadyUpSpec(
-		state.Group{ATURL: "https://at.example", FleetKey: "fleet"},
+		state.Group{ATURL: "https://at.example", FleetKey: "fleet", ReadyUpLicense: "commercial"},
 		varde.Server{},
 		"2025-01-02T03:04:05Z",
-		ReadyUpPin{URL: "https://readyup.example/file.zip", SHA256: strings.Repeat("c", 64), License: "commercial"},
+		ReadyUpPin{URL: "https://readyup.example/file.zip", SHA256: strings.Repeat("c", 64)},
 	)
 	if err != nil {
 		t.Fatal(err)

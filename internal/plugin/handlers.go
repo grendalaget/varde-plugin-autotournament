@@ -62,6 +62,11 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "admin role required")
 		return
 	}
+	readyUpLicense, err := rawString(request.Settings["readyup_license"])
+	if err != nil || !validReadyUpLicense(readyUpLicense) {
+		writeError(w, http.StatusBadRequest, "Ready Up license must be noncommercial or commercial")
+		return
+	}
 	atURL, err := rawString(request.Settings["at_url"])
 	if err != nil || strings.TrimSpace(atURL) == "" {
 		writeError(w, http.StatusBadRequest, "Auto Tournament URL is required")
@@ -124,10 +129,11 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	group := state.Group{
-		ATURL:      normalizedURL,
-		ATToken:    atToken,
-		FleetKey:   fleetKey,
-		AcceptedAt: previous.AcceptedAt,
+		ATURL:          normalizedURL,
+		ATToken:        atToken,
+		FleetKey:       fleetKey,
+		ReadyUpLicense: readyUpLicense,
+		AcceptedAt:     previous.AcceptedAt,
 	}
 	if err := s.state.Save(request.GroupID, group); err != nil {
 		s.logger.Error("save plugin group state", "group_id", request.GroupID, "error", err)
