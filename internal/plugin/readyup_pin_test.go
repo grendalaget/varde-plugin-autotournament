@@ -53,7 +53,7 @@ func TestReadyUpPinFromEnvUsesPairedOverrides(t *testing.T) {
 }
 
 func TestReadyUpPinFromEnvCanBeDisabled(t *testing.T) {
-	t.Setenv("READYUP_URL", "")
+	t.Setenv("READYUP_URL", "https://example.test/readyup.zip")
 	t.Setenv("READYUP_SHA256", "")
 	t.Setenv("READYUP_DISABLED", "true")
 
@@ -63,5 +63,15 @@ func TestReadyUpPinFromEnvCanBeDisabled(t *testing.T) {
 	}
 	if pin != nil {
 		t.Fatalf("ReadyUpPinFromEnv() = %#v, want nil when disabled", pin)
+	}
+}
+
+func TestReadyUpPinFromEnvRejectsMalformedDisabled(t *testing.T) {
+	t.Setenv("READYUP_URL", "https://example.test/readyup.zip")
+	t.Setenv("READYUP_SHA256", "")
+	t.Setenv("READYUP_DISABLED", "sometimes")
+
+	if pin, err := ReadyUpPinFromEnv(); err == nil || pin != nil {
+		t.Fatalf("ReadyUpPinFromEnv() = %#v, %v, want invalid READYUP_DISABLED error", pin, err)
 	}
 }

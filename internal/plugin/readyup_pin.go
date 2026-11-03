@@ -13,12 +13,6 @@ const (
 )
 
 func ReadyUpPinFromEnv() (*ReadyUpPin, error) {
-	url := strings.TrimSpace(os.Getenv("READYUP_URL"))
-	sha256 := strings.TrimSpace(os.Getenv("READYUP_SHA256"))
-	if (url == "") != (sha256 == "") {
-		return nil, errors.New("READYUP_URL and READYUP_SHA256 must be set together")
-	}
-
 	disabled := false
 	if value := strings.TrimSpace(os.Getenv("READYUP_DISABLED")); value != "" {
 		parsed, err := strconv.ParseBool(value)
@@ -29,6 +23,12 @@ func ReadyUpPinFromEnv() (*ReadyUpPin, error) {
 	}
 	if disabled {
 		return nil, nil
+	}
+
+	url := strings.TrimSpace(os.Getenv("READYUP_URL"))
+	sha256 := strings.TrimSpace(os.Getenv("READYUP_SHA256"))
+	if (url == "") != (sha256 == "") {
+		return nil, errors.New("READYUP_URL and READYUP_SHA256 must be set together")
 	}
 
 	pin := &ReadyUpPin{
