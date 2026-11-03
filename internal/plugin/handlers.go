@@ -128,12 +128,16 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	acceptedAt := previous.AcceptedAt
+	if previous.ReadyUpLicense != readyUpLicense {
+		acceptedAt = nil
+	}
 	group := state.Group{
 		ATURL:          normalizedURL,
 		ATToken:        atToken,
 		FleetKey:       fleetKey,
 		ReadyUpLicense: readyUpLicense,
-		AcceptedAt:     previous.AcceptedAt,
+		AcceptedAt:     acceptedAt,
 	}
 	if err := s.state.Save(request.GroupID, group); err != nil {
 		s.logger.Error("save plugin group state", "group_id", request.GroupID, "error", err)

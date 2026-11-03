@@ -106,10 +106,11 @@ func TestSettingsRequiresAdminOrOwner(t *testing.T) {
 			defer cpServer.Close()
 			service, store, secret := newTestService(t, cpServer.URL, nil)
 			previous := state.Group{
-				ATURL:      "https://previous.at.example.test",
-				ATToken:    "previous-token",
-				FleetKey:   "previous-fleet-key",
-				AcceptedAt: map[string]string{"server-1": "2026-01-01T00:00:00Z"},
+				ATURL:          "https://previous.at.example.test",
+				ATToken:        "previous-token",
+				FleetKey:       "previous-fleet-key",
+				ReadyUpLicense: "noncommercial",
+				AcceptedAt:     map[string]string{"server-1": "2026-01-01T00:00:00Z"},
 			}
 			if err := store.Save("group-1", previous); err != nil {
 				t.Fatal(err)
@@ -146,6 +147,9 @@ func TestSettingsRequiresAdminOrOwner(t *testing.T) {
 			if !ok || got.ATURL != atServer.URL || got.ATToken != "new-token" ||
 				got.FleetKey != "new-fleet-key" || got.ReadyUpLicense != "commercial" {
 				t.Fatalf("stored group after %s settings = %#v, found=%v", role, got, ok)
+			}
+			if len(got.AcceptedAt) != 0 {
+				t.Fatalf("stored acceptance timestamps after license change = %#v, want none", got.AcceptedAt)
 			}
 			if got := atCalls.Load(); got != 2 {
 				t.Fatalf("Auto Tournament calls for %s settings = %d, want 2", role, got)
