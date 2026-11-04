@@ -43,6 +43,7 @@ type Service struct {
 	logger         *slog.Logger
 
 	startMu        sync.Mutex
+	settingsMu     sync.Mutex
 	started        bool
 	runWG          sync.WaitGroup
 	groupChanges   chan groupChange

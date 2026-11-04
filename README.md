@@ -54,12 +54,33 @@ HTTP client still refuses redirects and uses a 10-second request timeout.
 
 ## Configure a group
 
-In the plugin settings, provide the Auto Tournament base URL and API token.
-The settings hook validates the URL and pings the API before saving. If the
+Choose **Run it on one of our PCs** to let Varde run Auto Tournament on a Linux
+PC in your group. Choose the licence before starting the managed server. Varde
+fills in the address and API token when it is ready and keeps them up to date.
+This requires Varde's managed plugin server API and a configured public gateway.
+
+Choose **I already have Auto Tournament** to provide your own base URL and API
+token as before. The address and token remain editable in this mode.
+
+The settings hook validates the URL and token before saving. On a fresh Auto
+Tournament installation it installs the CS2 module before creating a fleet key.
+Existing installations with the fleet API available are left alone. If the
 hidden `fleet_key` is empty, the plugin creates one named `varde-<group_id>`
 and returns it to Varde for storage. The API token and fleet key are encrypted
 in the plugin's state file as well as protected by Varde's own settings storage.
 Changing `at_url` issues a new fleet key on the new Auto Tournament installation.
+
+Settings hooks with an `Idempotency-Key` return their saved result on replay,
+including after a plugin restart. Reusing a key with different settings returns
+409. Receipts and fleet keys are saved together, with the keys encrypted. Calls
+are serialized so concurrent replays cannot create extra keys. Auto Tournament
+does not provide a recoverable fleet key creation transaction: a process crash
+after it creates a key but before the plugin saves the result can still leave an
+orphan key.
+
+Varde currently rejects secret fields in `managed_server.config`, so the managed
+manifest cannot pass a Steam Web API key to the driver. Configure that on an
+existing Auto Tournament installation when using manual mode.
 
 The Tournaments page lists existing tournaments and links to their Auto
 Tournament pages. Creating a tournament imports group members' verified Steam
@@ -147,6 +168,7 @@ other plugin routes retain their existing authentication.
 go vet ./...
 go test -race ./...
 test -z "$(gofmt -l .)"
+python3 scripts/validate-manifest.py ../varde
 ```
 
 The test suite includes the ported Auto Tournament client tests, JWT and

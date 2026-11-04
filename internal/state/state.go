@@ -23,11 +23,24 @@ const (
 )
 
 type Group struct {
-	ATURL          string
-	ATToken        string
-	FleetKey       string
-	ReadyUpLicense string
-	AcceptedAt     map[string]string
+	ATURL            string
+	ATToken          string
+	FleetKey         string
+	ReadyUpLicense   string
+	AcceptedAt       map[string]string
+	SettingsReceipts map[string]SettingsReceipt
+}
+
+type SettingsReceipt struct {
+	Digest   string
+	ATURL    string
+	FleetKey string
+}
+
+type diskReceipt struct {
+	Digest   string      `json:"digest"`
+	ATURL    string      `json:"at_url"`
+	FleetKey sealedValue `json:"fleet_key"`
 }
 
 type sealedValue struct {
@@ -35,11 +48,12 @@ type sealedValue struct {
 }
 
 type diskGroup struct {
-	ATURL          string            `json:"at_url"`
-	ATToken        sealedValue       `json:"at_token"`
-	FleetKey       sealedValue       `json:"fleet_key"`
-	ReadyUpLicense string            `json:"readyup_license,omitempty"`
-	AcceptedAt     map[string]string `json:"accepted_at,omitempty"`
+	ATURL            string                 `json:"at_url"`
+	ATToken          sealedValue            `json:"at_token"`
+	FleetKey         sealedValue            `json:"fleet_key"`
+	ReadyUpLicense   string                 `json:"readyup_license,omitempty"`
+	AcceptedAt       map[string]string      `json:"accepted_at,omitempty"`
+	SettingsReceipts map[string]diskReceipt `json:"settings_receipts,omitempty"`
 }
 
 type Store struct {
@@ -95,12 +109,21 @@ func (s *Store) load() error {
 		if err != nil {
 			return fmt.Errorf("decrypt fleet key for group %q: %w", groupID, err)
 		}
+		receipts := make(map[string]SettingsReceipt, len(item.SettingsReceipts))
+		for key, receipt := range item.SettingsReceipts {
+			value, err := s.open(groupID, "settings_receipt/"+key, receipt.FleetKey)
+			if err != nil {
+				return fmt.Errorf("decrypt settings receipt for group %q: %w", groupID, err)
+			}
+			receipts[key] = SettingsReceipt{Digest: receipt.Digest, ATURL: receipt.ATURL, FleetKey: value}
+		}
 		s.groups[groupID] = Group{
-			ATURL:          item.ATURL,
-			ATToken:        token,
-			FleetKey:       fleetKey,
-			ReadyUpLicense: item.ReadyUpLicense,
-			AcceptedAt:     cloneMap(item.AcceptedAt),
+			ATURL:            item.ATURL,
+			ATToken:          token,
+			FleetKey:         fleetKey,
+			ReadyUpLicense:   item.ReadyUpLicense,
+			AcceptedAt:       cloneMap(item.AcceptedAt),
+			SettingsReceipts: receipts,
 		}
 	}
 	if err := os.Chmod(s.path, 0o600); err != nil {
@@ -193,12 +216,21 @@ func (s *Store) writeLocked() error {
 		if err != nil {
 			return fmt.Errorf("encrypt fleet key: %w", err)
 		}
+		receipts := make(map[string]diskReceipt, len(group.SettingsReceipts))
+		for key, receipt := range group.SettingsReceipts {
+			value, err := s.seal(groupID, "settings_receipt/"+key, receipt.FleetKey)
+			if err != nil {
+				return fmt.Errorf("encrypt settings receipt: %w", err)
+			}
+			receipts[key] = diskReceipt{Digest: receipt.Digest, ATURL: receipt.ATURL, FleetKey: value}
+		}
 		disk[groupID] = diskGroup{
-			ATURL:          group.ATURL,
-			ATToken:        token,
-			FleetKey:       fleetKey,
-			ReadyUpLicense: group.ReadyUpLicense,
-			AcceptedAt:     cloneMap(group.AcceptedAt),
+			ATURL:            group.ATURL,
+			ATToken:          token,
+			FleetKey:         fleetKey,
+			ReadyUpLicense:   group.ReadyUpLicense,
+			AcceptedAt:       cloneMap(group.AcceptedAt),
+			SettingsReceipts: receipts,
 		}
 	}
 	data, err := json.MarshalIndent(disk, "", "  ")
@@ -283,6 +315,13 @@ func (s *Store) open(groupID, field string, value sealedValue) (string, error) {
 
 func cloneGroup(group Group) Group {
 	group.AcceptedAt = cloneMap(group.AcceptedAt)
+	if group.SettingsReceipts != nil {
+		receipts := make(map[string]SettingsReceipt, len(group.SettingsReceipts))
+		for key, receipt := range group.SettingsReceipts {
+			receipts[key] = receipt
+		}
+		group.SettingsReceipts = receipts
+	}
 	return group
 }
 

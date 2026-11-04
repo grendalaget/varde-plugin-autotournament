@@ -203,6 +203,27 @@ func (c *Client) CheckToken(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) EnsureCS2(ctx context.Context) error {
+	_, status, err := c.do(ctx, http.MethodGet, "/api/fleet/keys", nil, nil)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNotFound {
+		body, installed, err := c.do(ctx, http.MethodPost, "/api/catalog/modules/cs2/install", map[string]any{}, nil)
+		if err != nil {
+			return err
+		}
+		if installed < 200 || installed >= 300 {
+			return responseError(installed, body)
+		}
+		return c.CheckToken(ctx)
+	}
+	if status < 200 || status >= 300 {
+		return responseError(status, nil)
+	}
+	return nil
+}
+
 func (c *Client) CreateFleetKey(ctx context.Context, name string) (string, error) {
 	body, status, err := c.do(ctx, http.MethodPost, "/api/fleet/keys",
 		map[string]any{"name": name, "autoLink": true}, nil)

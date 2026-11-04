@@ -16,11 +16,12 @@ func TestEncryptedStateRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Group{
-		ATURL:          "https://at.example",
-		ATToken:        "auto-token-value",
-		FleetKey:       "fleet-key-value",
-		ReadyUpLicense: "noncommercial",
-		AcceptedAt:     map[string]string{"server-1": "2025-01-02T03:04:05Z"},
+		ATURL:            "https://at.example",
+		ATToken:          "auto-token-value",
+		FleetKey:         "fleet-key-value",
+		ReadyUpLicense:   "noncommercial",
+		AcceptedAt:       map[string]string{"server-1": "2025-01-02T03:04:05Z"},
+		SettingsReceipts: map[string]SettingsReceipt{"receipt-1": {Digest: "digest", ATURL: "https://old.example", FleetKey: "historic-fleet-secret"}},
 	}
 	if err := store.Save("group-1", want); err != nil {
 		t.Fatal(err)
@@ -33,6 +34,9 @@ func TestEncryptedStateRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(string(data), want.ATToken) || strings.Contains(string(data), want.FleetKey) {
 		t.Fatal("state file contains an unencrypted credential")
+	}
+	if strings.Contains(string(data), "historic-fleet-secret") {
+		t.Fatal("receipt credential is not encrypted")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -54,6 +58,14 @@ func TestEncryptedStateRoundTrip(t *testing.T) {
 		got.ReadyUpLicense != want.ReadyUpLicense ||
 		got.AcceptedAt["server-1"] != want.AcceptedAt["server-1"] {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
+	}
+	if got.SettingsReceipts["receipt-1"] != want.SettingsReceipts["receipt-1"] {
+		t.Fatal("receipt did not survive restart")
+	}
+	delete(got.SettingsReceipts, "receipt-1")
+	stored, _ := reopened.Get("group-1")
+	if len(stored.SettingsReceipts) != 1 {
+		t.Fatal("caller mutated stored receipts")
 	}
 }
 

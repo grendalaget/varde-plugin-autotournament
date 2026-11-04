@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -62,6 +63,8 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "admin role required")
 		return
 	}
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	readyUpLicense, err := rawString(request.Settings["readyup_license"])
 	if err != nil || !validReadyUpLicense(readyUpLicense) {
 		writeError(w, http.StatusBadRequest, "Ready Up license must be noncommercial or commercial")
@@ -82,12 +85,40 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Auto Tournament token is required")
 		return
 	}
+	previous, _ := s.state.Get(request.GroupID)
+	receiptKey := ""
+	digest := ""
+	if key := r.Header.Get("Idempotency-Key"); key != "" {
+		keyHash := sha256.Sum256([]byte(key))
+		receiptKey = hex.EncodeToString(keyHash[:])
+		inputs := make(map[string]json.RawMessage, len(request.Settings))
+		for name, value := range request.Settings {
+			if name != "fleet_key" && name != "fleet_key_url" {
+				inputs[name] = value
+			}
+		}
+		encoded, err := json.Marshal(inputs)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid settings")
+			return
+		}
+		hash := sha256.Sum256(encoded)
+		digest = hex.EncodeToString(hash[:])
+		if receipt, ok := previous.SettingsReceipts[receiptKey]; ok {
+			if receipt.Digest != digest {
+				writeError(w, http.StatusConflict, "idempotency key was already used with different settings")
+				return
+			}
+			writeSettingsStore(w, receipt.ATURL, receipt.FleetKey)
+			return
+		}
+	}
 	client, err := at.NewClientWithOptions(normalizedURL, atToken, s.allowPrivateAT)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := client.CheckToken(r.Context()); err != nil {
+	if err := client.EnsureCS2(r.Context()); err != nil {
 		if errors.Is(err, at.ErrUnauthorized) {
 			writeError(w, http.StatusBadRequest, "Auto Tournament rejected the token")
 			return
@@ -96,7 +127,6 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	previous, _ := s.state.Get(request.GroupID)
 	fleetKey := ""
 	if previous.ATURL == normalizedURL {
 		fleetKey = previous.FleetKey
@@ -133,11 +163,18 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 		acceptedAt = nil
 	}
 	group := state.Group{
-		ATURL:          normalizedURL,
-		ATToken:        atToken,
-		FleetKey:       fleetKey,
-		ReadyUpLicense: readyUpLicense,
-		AcceptedAt:     acceptedAt,
+		ATURL:            normalizedURL,
+		ATToken:          atToken,
+		FleetKey:         fleetKey,
+		ReadyUpLicense:   readyUpLicense,
+		AcceptedAt:       acceptedAt,
+		SettingsReceipts: previous.SettingsReceipts,
+	}
+	if receiptKey != "" {
+		if group.SettingsReceipts == nil {
+			group.SettingsReceipts = make(map[string]state.SettingsReceipt)
+		}
+		group.SettingsReceipts[receiptKey] = state.SettingsReceipt{Digest: digest, ATURL: normalizedURL, FleetKey: fleetKey}
 	}
 	if err := s.state.Save(request.GroupID, group); err != nil {
 		s.logger.Error("save plugin group state", "group_id", request.GroupID, "error", err)
@@ -147,12 +184,18 @@ func (s *Service) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if s.readyUp != nil {
 		s.enableGroup(request.GroupID)
 	}
+	writeSettingsStore(w, normalizedURL, fleetKey)
+}
+
+func writeSettingsStore(w http.ResponseWriter, atURL, fleetKey string) {
 	writeJSON(w, http.StatusOK, map[string]any{"store": map[string]string{
-		"fleet_key": fleetKey, "fleet_key_url": normalizedURL,
+		"fleet_key": fleetKey, "fleet_key_url": atURL,
 	}})
 }
 
 func (s *Service) handleDisable(w http.ResponseWriter, r *http.Request) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	if r.Header.Get("X-Varde-Op") != "disable" {
 		writeError(w, http.StatusBadRequest, "unexpected plugin operation")
 		return
