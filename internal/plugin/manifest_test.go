@@ -32,7 +32,7 @@ func TestManifestExampleContainsRequiredReadyUpLicenseSetting(t *testing.T) {
 		if setting.Type != "select" || !setting.Required ||
 			len(setting.Options) != 2 || setting.Options[0] != "noncommercial" ||
 			setting.Options[1] != "commercial" || setting.Default != nil ||
-			setting.Label != "" || setting.Placeholder != "" {
+			setting.Label != "Ready Up licence" || setting.Placeholder != "" {
 			t.Fatalf("readyup_license setting = %#v", setting)
 		}
 		return
