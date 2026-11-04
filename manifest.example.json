@@ -9,16 +9,23 @@
     {
       "name": "at_url",
       "type": "string",
+      "label": "Auto Tournament address",
+      "placeholder": "https://tournament.example.com",
+      "help": "The address players use to open your Auto Tournament site.",
       "required": true
     },
     {
       "name": "at_token",
       "type": "secret",
+      "label": "Auto Tournament API token",
+      "help": "Create one in Auto Tournament under Settings, API tokens.",
       "required": true
     },
     {
       "name": "readyup_license",
       "type": "select",
+      "label": "Ready Up licence",
+      "help": "Use noncommercial for free events. Paid entry, prize money from sponsors or paid hosting needs a commercial licence from Auto Tournament.",
       "options": [
         "noncommercial",
         "commercial"
@@ -52,11 +59,13 @@
             {
               "name": "name",
               "type": "string",
+              "label": "Tournament name",
               "required": true
             },
             {
               "name": "format",
               "type": "select",
+              "label": "Format",
               "default": "shuffle",
               "options": [
                 "shuffle",
@@ -67,11 +76,13 @@
             {
               "name": "team_size",
               "type": "int",
+              "label": "Players per team",
               "default": 5
             },
             {
               "name": "maps",
               "type": "multiselect",
+              "label": "Map pool",
               "default": [
                 "de_mirage",
                 "de_inferno",
@@ -86,6 +97,8 @@
             {
               "name": "players",
               "type": "member_multiselect",
+              "label": "Players",
+              "help": "Only members who have linked Steam can be picked.",
               "requires": "steam_id"
             }
           ]
