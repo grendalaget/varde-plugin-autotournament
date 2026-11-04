@@ -54,22 +54,25 @@ func TestManifestManagedAndManualModes(t *testing.T) {
 			Bindings map[string]string `json:"bindings"`
 		} `json:"managed_server"`
 		Settings []struct {
-			Name    string   `json:"name"`
-			Default any      `json:"default"`
-			Options []string `json:"options"`
-			Help    string   `json:"help"`
-			Hidden  bool     `json:"hidden"`
+			Name     string   `json:"name"`
+			Type     string   `json:"type"`
+			Required bool     `json:"required"`
+			Default  any      `json:"default"`
+			Options  []string `json:"options"`
+			Help     string   `json:"help"`
+			Hidden   bool     `json:"hidden"`
 		} `json:"settings"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	if manifest.Managed.Game != "autotournament" || manifest.Managed.Mode != "hosting_mode" ||
-		!reflect.DeepEqual(manifest.Managed.Config, map[string]string{"licence": "readyup_license"}) ||
+		!reflect.DeepEqual(manifest.Managed.Config, map[string]string{"licence": "readyup_license", "steam_web_api_key": "steam_api_key"}) ||
 		!reflect.DeepEqual(manifest.Managed.Bindings, map[string]string{"at_url": "public_url", "at_token": "secret:api_token"}) {
 		t.Fatalf("managed declaration = %#v", manifest.Managed)
 	}
 	found := false
+	steamFound := false
 	for _, setting := range manifest.Settings {
 		if setting.Name == "hosting_mode" {
 			found = true
@@ -84,8 +87,17 @@ func TestManifestManagedAndManualModes(t *testing.T) {
 		if setting.Name == "readyup_license" && setting.Help != "This licence choice applies to both Auto Tournament and Ready Up." {
 			t.Fatal("licence help must cover both products")
 		}
+		if setting.Name == "steam_api_key" {
+			steamFound = true
+			if setting.Type != "secret" || setting.Required || setting.Help != "Lets players sign in with Steam for map veto. Get one at https://steamcommunity.com/dev/apikey." {
+				t.Fatal("Steam key must be optional, secret and explain map veto sign in")
+			}
+		}
 	}
 	if !found {
 		t.Fatal("hosting mode missing")
+	}
+	if !steamFound {
+		t.Fatal("Steam key setting missing")
 	}
 }

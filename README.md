@@ -78,9 +78,12 @@ does not provide a recoverable fleet key creation transaction: a process crash
 after it creates a key but before the plugin saves the result can still leave an
 orphan key.
 
-Varde currently rejects secret fields in `managed_server.config`, so the managed
-manifest cannot pass a Steam Web API key to the driver. Configure that on an
-existing Auto Tournament installation when using manual mode.
+In managed mode, the optional Steam Web API key lets players sign in with Steam
+for map veto. Varde encrypts it and passes it to the managed server without
+including it in public settings or server config. Leave it empty to omit it, or
+clear it to remove a saved key. Changing it redeploys the managed server the next
+time you start it. In manual mode, configure the key on your existing Auto
+Tournament installation instead.
 
 The Tournaments page lists existing tournaments and links to their Auto
 Tournament pages. Creating a tournament imports group members' verified Steam

@@ -9,7 +9,8 @@
     "game": "autotournament",
     "mode_setting": "hosting_mode",
     "config": {
-      "licence": "readyup_license"
+      "licence": "readyup_license",
+      "steam_web_api_key": "steam_api_key"
     },
     "bindings": {
       "at_url": "public_url",
@@ -41,6 +42,12 @@
       "label": "Auto Tournament API token",
       "help": "Create one in Auto Tournament under Settings, API tokens.",
       "required": true
+    },
+    {
+      "name": "steam_api_key",
+      "type": "secret",
+      "label": "Steam Web API key",
+      "help": "Lets players sign in with Steam for map veto. Get one at https://steamcommunity.com/dev/apikey."
     },
     {
       "name": "readyup_license",
