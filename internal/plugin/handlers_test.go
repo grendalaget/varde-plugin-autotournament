@@ -824,6 +824,7 @@ func servePluginRequestWithRole(
 	operation string,
 	role string,
 	payload any,
+	headers ...http.Header,
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	body, err := json.Marshal(payload)
@@ -855,7 +856,112 @@ func servePluginRequestWithRole(
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Varde-Op", operation)
+	for _, extra := range headers {
+		for key, values := range extra {
+			request.Header[key] = values
+		}
+	}
 	recorder := httptest.NewRecorder()
 	service.Handler().ServeHTTP(recorder, request)
 	return recorder
+}
+
+func TestSettingsIdempotencyAcrossModesAndRestarts(t *testing.T) {
+	for _, mode := range []string{"Run it on one of our PCs", "I already have Auto Tournament"} {
+		t.Run(mode, func(t *testing.T) {
+			var creates atomic.Int32
+			server := newFleetKeyATServer(t, "receipt-fleet-key", &creates)
+			defer server.Close()
+			cp := httptest.NewServer(http.NotFoundHandler())
+			defer cp.Close()
+			dir := t.TempDir()
+			service, store, secret := newTestServiceWithStateDir(t, cp.URL, nil, dir)
+			settings := map[string]string{"hosting_mode": mode, "at_url": server.URL,
+				"at_token": "valid-token", "readyup_license": "noncommercial"}
+			payload := map[string]any{"group_id": "group-1", "user": map[string]string{"id": "user-1"}, "settings": settings}
+			headers := http.Header{"Idempotency-Key": []string{"managed-server:server-1:binding"}}
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Go(func() {
+					response := servePluginRequestWithRole(t, service, secret, "settings", "owner", payload, headers)
+					if response.Code != 200 {
+						t.Errorf("hook status = %d: %s", response.Code, response.Body)
+					}
+				})
+			}
+			wg.Wait()
+			if creates.Load() != 1 {
+				t.Fatalf("created %d keys", creates.Load())
+			}
+			group, _ := store.Get("group-1")
+			if len(group.SettingsReceipts) != 1 {
+				t.Fatal("receipt not persisted")
+			}
+			service, _, secret = newTestServiceWithStateDir(t, cp.URL, nil, dir)
+			server.Close()
+			settings["fleet_key"] = "receipt-fleet-key"
+			settings["fleet_key_url"] = server.URL
+			replay := servePluginRequestWithRole(t, service, secret, "settings", "owner", payload, headers)
+			if replay.Code != 200 || !strings.Contains(replay.Body.String(), "receipt-fleet-key") {
+				t.Fatalf("replay after restart = %d %s", replay.Code, replay.Body)
+			}
+			settings["at_token"] = "changed-token"
+			conflict := servePluginRequestWithRole(t, service, secret, "settings", "owner", payload, headers)
+			if conflict.Code != http.StatusConflict {
+				t.Fatalf("changed request status = %d", conflict.Code)
+			}
+			if creates.Load() != 1 {
+				t.Fatal("replay created a second fleet key")
+			}
+		})
+	}
+}
+
+func TestSettingsInstallsMissingCS2BeforeFleetKey(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			var installed atomic.Bool
+			var creates atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == "GET" && r.URL.Path == "/api/fleet/keys":
+					if !installed.Load() {
+						http.NotFound(w, r)
+						return
+					}
+					_, _ = w.Write([]byte(`{"keys":[]}`))
+				case r.Method == "POST" && r.URL.Path == "/api/catalog/modules/cs2/install":
+					if fail {
+						w.WriteHeader(503)
+						return
+					}
+					installed.Store(true)
+					_, _ = w.Write([]byte(`{"success":true}`))
+				case r.Method == "POST" && r.URL.Path == "/api/fleet/keys":
+					if !installed.Load() {
+						t.Error("fleet key requested before CS2 installation")
+					}
+					creates.Add(1)
+					_, _ = w.Write([]byte(`{"value":"fleet-key"}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			cp := httptest.NewServer(http.NotFoundHandler())
+			defer cp.Close()
+			service, _, secret := newTestService(t, cp.URL, nil)
+			response := servePluginRequest(t, service, secret, "settings", map[string]any{
+				"group_id": "group-1", "user": map[string]string{"id": "user-1"}, "settings": map[string]string{"at_url": server.URL,
+					"at_token": "token", "readyup_license": "noncommercial"},
+			})
+			if fail {
+				if response.Code != 502 || creates.Load() != 0 {
+					t.Fatalf("failed install: status %d, creates %d", response.Code, creates.Load())
+				}
+			} else if response.Code != 200 || creates.Load() != 1 {
+				t.Fatalf("installed: status %d, creates %d", response.Code, creates.Load())
+			}
+		})
+	}
 }

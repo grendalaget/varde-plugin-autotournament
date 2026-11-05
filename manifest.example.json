@@ -5,7 +5,29 @@
   "base_url": "http://127.0.0.1:7310",
   "secret_env": "VARDE_PLUGIN_SECRET",
   "service_token": "plugin-autotournament",
+  "managed_server": {
+    "game": "autotournament",
+    "mode_setting": "hosting_mode",
+    "config": {
+      "licence": "readyup_license",
+      "steam_web_api_key": "steam_api_key"
+    },
+    "bindings": {
+      "at_url": "public_url",
+      "at_token": "secret:api_token"
+    }
+  },
   "settings": [
+    {
+      "name": "hosting_mode",
+      "type": "select",
+      "label": "Hosting",
+      "default": "Run it on one of our PCs",
+      "options": [
+        "Run it on one of our PCs",
+        "I already have Auto Tournament"
+      ]
+    },
     {
       "name": "at_url",
       "type": "string",
@@ -22,10 +44,16 @@
       "required": true
     },
     {
+      "name": "steam_api_key",
+      "type": "secret",
+      "label": "Steam Web API key",
+      "help": "Lets players sign in with Steam for map veto. Get one at https://steamcommunity.com/dev/apikey."
+    },
+    {
       "name": "readyup_license",
       "type": "select",
       "label": "Ready Up licence",
-      "help": "Use noncommercial for free events. Paid entry, prize money from sponsors or paid hosting needs a commercial licence from Auto Tournament.",
+      "help": "This licence choice applies to both Auto Tournament and Ready Up.",
       "options": [
         "noncommercial",
         "commercial"
